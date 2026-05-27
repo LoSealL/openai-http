@@ -11,4 +11,4 @@ wheels/
 
 .opencode/commands/*
 .specify
-specs/*
+# specs/*
