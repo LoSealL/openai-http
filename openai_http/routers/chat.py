@@ -16,7 +16,7 @@ from openai_http.auth import verify_api_key
 from openai_http.schemas.chat import (
     ChatCompletionRequest,
 )
-from openai_http.errors import NotFoundError, InvalidRequestError
+from openai_http.errors import NotFoundError, InvalidRequestError, NotImplementedOpenAIError
 
 
 router = APIRouter(tags=["Chat"], dependencies=[Depends(verify_api_key)])
@@ -67,11 +67,14 @@ async def chat_completions(
         if body.tool_choice is not None:
             tc_kwargs["tool_choice"] = body.tool_choice
         if hasattr(backend, "generate_tool_calls"):
-            tool_calls_result = await backend.generate_tool_calls(
-                messages,
-                [t.model_dump() for t in body.tools],
-                **tc_kwargs,
-            )
+            try:
+                tool_calls_result = await backend.generate_tool_calls(
+                    messages,
+                    [t.model_dump() for t in body.tools],
+                    **tc_kwargs,
+                )
+            except NotImplementedError:
+                raise NotImplementedOpenAIError("Tool calls are not supported by this backend")
 
         if tool_calls_result:
             tool_finish_reason = "tool_calls"

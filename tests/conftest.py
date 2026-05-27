@@ -4,7 +4,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from openai_http.app import create_app
-from openai_http.config import Settings, BackendSettings, AuthSettings, ServerSettings, QueueSettings, ObservabilitySettings
+from openai_http.config import Settings, AuthSettings, ServerSettings, QueueSettings, ObservabilitySettings
 
 
 @pytest.fixture(scope="session")
@@ -12,7 +12,6 @@ def mock_config():
     """Create test configuration with mock backend and auth disabled."""
     return Settings(
         server=ServerSettings(host="127.0.0.1", port=8000),
-        backend=BackendSettings(type="mock"),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
         observability=ObservabilitySettings(log_level="debug", log_format="text", metrics_enabled=False),
@@ -38,4 +37,4 @@ async def client(app):
 def mock_backend():
     """Mock backend instance for testing."""
     from openai_http.backends.mock_backend import MockTransformersBackend
-    return MockTransformersBackend(model_name="mock-model", device="cpu")
+    return MockTransformersBackend(model_name="mock-model")

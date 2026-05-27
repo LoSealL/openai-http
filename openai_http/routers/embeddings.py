@@ -14,7 +14,7 @@ from openai_http.schemas.embeddings import (
     EmbeddingObject,
     floats_to_base64,
 )
-from openai_http.errors import NotFoundError, InvalidRequestError
+from openai_http.errors import NotFoundError, InvalidRequestError, NotImplementedOpenAIError
 
 
 router = APIRouter(tags=["Embeddings"], dependencies=[Depends(verify_api_key)])
@@ -54,7 +54,10 @@ async def create_embeddings(
     if body.dimensions is not None:
         kwargs["dimensions"] = body.dimensions
 
-    embeddings = await backend.embed(texts, **kwargs)
+    try:
+        embeddings = await backend.embed(texts, **kwargs)
+    except NotImplementedError:
+        raise NotImplementedOpenAIError("Embeddings are not supported by this backend")
 
     data = []
     for i, vec in enumerate(embeddings):

@@ -1,55 +1,49 @@
-"""
-FastAPI application factory.
-
-Creates and configures the FastAPI application with:
-- Lifespan management (model loading)
-- CORS middleware
-- Configuration injection into app.state
-- Error handlers (OpenAI format)
-- Observability middleware (logging + metrics)
-- Request queue
-"""
-
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from openai_http.config import Settings
-from openai_http.queue import RequestQueue
 from openai_http.errors import register_error_handlers
 from openai_http.observability.logging import (
-    setup_logging,
     RequestIDMiddleware,
     RequestLoggingMiddleware,
+    setup_logging,
 )
+from openai_http.queue import RequestQueue
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager.
-    """
     settings = app.state.config
     app.state.queue = RequestQueue(max_depth=settings.queue.depth)
 
-    # Initialize backend
-    from openai_http.backends.mock_backend import MockTransformersBackend
-
-    if settings.backend.type == "transformers":
-        # TODO: Phase 6 - Implement real transformers backend
-        raise NotImplementedError("Transformers backend not yet implemented")
+    injected = getattr(app.state, "_injected_backend", None)
+    if injected is not None:
+        app.state.backend = injected
+        try:
+            await injected.setup()
+        except Exception as e:
+            raise RuntimeError(f"Backend setup failed: {e}") from e
     else:
+        from openai_http.backends.mock_backend import MockTransformersBackend
+
         app.state.backend = MockTransformersBackend(
             model_name="mock-model",
-            device=settings.backend.device,
         )
 
     yield
-    # Shutdown: cleanup
+
+    backend = getattr(app.state, "backend", None)
+    if backend is not None and injected is not None:
+        await backend.teardown()
     app.state.backend = None
 
 
-def create_app(config: Settings | None = None) -> FastAPI:
+def create_app(
+    config: Settings | None = None,
+    backend=None,
+) -> FastAPI:
     """
     Create and configure FastAPI application.
     """
@@ -71,6 +65,8 @@ def create_app(config: Settings | None = None) -> FastAPI:
     )
 
     app.state.config = config
+    if backend is not None:
+        app.state._injected_backend = backend
 
     register_error_handlers(app)
 
@@ -84,8 +80,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
-    # Register routers
-    from openai_http.routers import chat, models, health, completions, embeddings, audio, images
+    from openai_http.routers import audio, chat, completions, embeddings, health, images, models
 
     app.include_router(chat.router)
     app.include_router(models.router)

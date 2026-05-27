@@ -9,8 +9,6 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
-    "transformers>=4.38.0",
-    "torch>=2.2.0",
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-prometheus>=0.41b0",
@@ -19,6 +17,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["openai_http*"]
 exclude = ["tests*", "specs*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [

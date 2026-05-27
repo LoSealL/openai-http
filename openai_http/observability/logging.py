@@ -35,7 +35,7 @@ class JSONFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "info", log_format: str = "json") -> None:
-    """Configure structured logging."""
+    """Configure structured logging for the running application (internal)."""
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.handlers.clear()

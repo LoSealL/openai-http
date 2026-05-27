@@ -5,12 +5,6 @@
 host = "0.0.0.0"
 port = 8000
 
-[backend]
-type = "mock"  # "transformers" for real model inference, "mock" for testing
-# model_path = "Qwen/Qwen2.5-0.5B-Instruct"  # Uncomment for real backend
-device = "auto"  # "cuda", "cpu", or "auto"
-torch_dtype = "auto"  # "auto", "float16", "bfloat16", "float32"
-
 [auth]
 enabled = false
 api_keys = []  # Add API keys when auth.enabled = true

@@ -107,6 +107,21 @@ class RateLimitError(OpenAIError):
         )
 
 
+class NotImplementedOpenAIError(OpenAIError):
+    """Backend does not implement an optional capability."""
+
+    def __init__(
+        self,
+        message: str,
+    ):
+        super().__init__(
+            message=message,
+            error_type="not_implemented_error",
+            code=None,
+            status_code=501,
+        )
+
+
 def _error_json(
     message: str,
     error_type: str,

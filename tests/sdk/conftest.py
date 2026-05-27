@@ -41,7 +41,6 @@ def _start_server_thread():
     from openai_http.config import Settings
 
     # Ensure mock backend
-    os.environ["OPENAI_HTTP__BACKEND__TYPE"] = "mock"
     os.environ["OPENAI_HTTP__AUTH__ENABLED"] = "false"
     os.environ["OPENAI_HTTP__OBSERVABILITY__LOG_LEVEL"] = "warning"
     os.environ["OPENAI_HTTP__OBSERVABILITY__LOG_FORMAT"] = "text"

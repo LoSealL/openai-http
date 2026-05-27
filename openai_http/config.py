@@ -13,6 +13,7 @@ Usage:
 import tomllib
 from pathlib import Path
 from typing import Optional
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,14 +22,6 @@ class ServerSettings(BaseSettings):
     """Server configuration."""
     host: str = "0.0.0.0"
     port: int = 8000
-
-
-class BackendSettings(BaseSettings):
-    """Backend configuration."""
-    type: str = "mock"  # "transformers" or "mock"
-    model_path: Optional[str] = None
-    device: str = "auto"  # "cuda", "cpu", or "auto"
-    torch_dtype: str = "auto"  # "auto", "float16", "bfloat16", "float32"
 
 
 class AuthSettings(BaseSettings):
@@ -63,7 +56,7 @@ class Settings(BaseSettings):
     Examples:
         OPENAI_HTTP__SERVER__PORT=9000
         OPENAI_HTTP__AUTH__ENABLED=true
-        OPENAI_HTTP__BACKEND__MODEL_PATH=meta-llama/Llama-3.2-1B-Instruct
+        OPENAI_HTTP__BACKEND__DEVICE=cuda
     """
 
     model_config = SettingsConfigDict(
@@ -74,7 +67,6 @@ class Settings(BaseSettings):
     )
 
     server: ServerSettings = ServerSettings()
-    backend: BackendSettings = BackendSettings()
     auth: AuthSettings = AuthSettings()
     queue: QueueSettings = QueueSettings()
     observability: ObservabilitySettings = ObservabilitySettings()

@@ -5,87 +5,12 @@ Implements the Backend Protocol using mock data and simple token estimation.
 No real model weights are loaded.
 """
 
+import asyncio
 import json
 import random
-import asyncio
-from typing import AsyncGenerator, Optional, Any
+from typing import Any, AsyncGenerator, Optional
 
-
-
-class MockTokenizer:
-    """
-    Mock tokenizer using Unicode code point mapping.
-    - encode: each char -> ord(char) + OFFSET
-    - decode: token ID -> chr(token_id - OFFSET)
-    Fully reversible, no vocabulary table needed.
-    """
-
-    OFFSET = 100
-
-    def __init__(self):
-        self.bos_token_id = 1
-        self.eos_token_id = 2
-        self.pad_token_id = 0
-        self.unk_token_id = 3
-        self.vocab_size = 0x110000 + self.OFFSET + 10
-
-    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
-        tokens = []
-        if add_special_tokens:
-            tokens.append(self.bos_token_id)
-        for char in text:
-            tokens.append(ord(char) + self.OFFSET)
-        if add_special_tokens:
-            tokens.append(self.eos_token_id)
-        return tokens
-
-    def decode(self, token_ids: list[int], skip_special_tokens: bool = True) -> str:
-        special = {self.bos_token_id, self.eos_token_id, self.pad_token_id, self.unk_token_id}
-        chars = []
-        for tid in token_ids:
-            if skip_special_tokens and tid in special:
-                continue
-            if tid >= self.OFFSET:
-                chars.append(chr(tid - self.OFFSET))
-            else:
-                chars.append("\ufffd")
-        return "".join(chars)
-
-    def apply_chat_template(
-        self,
-        messages: list[dict[str, str]],
-        add_generation_prompt: bool = True,
-        **kwargs,
-    ) -> str:
-        parts = []
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            parts.append(f"<|{role}|>\n{content}")
-        if add_generation_prompt:
-            parts.append("<|assistant|>\n")
-        return "\n".join(parts)
-
-    def convert_ids_to_tokens(self, token_ids: list[int]) -> list[str]:
-        special_names = {
-            self.bos_token_id: "<s>",
-            self.eos_token_id: "</s>",
-            self.pad_token_id: "<pad>",
-            self.unk_token_id: "<unk>",
-        }
-        result = []
-        for tid in token_ids:
-            if tid in special_names:
-                result.append(special_names[tid])
-            elif tid >= self.OFFSET:
-                char = chr(tid - self.OFFSET)
-                if char.isprintable():
-                    result.append(char)
-                else:
-                    result.append(f"<0x{tid - self.OFFSET:04X}>")
-            else:
-                result.append(f"<0x{tid:04X}>")
-        return result
+from openai_http.backends.base import BackendBase
 
 
 AVAILABLE_MODELS = [
@@ -94,26 +19,14 @@ AVAILABLE_MODELS = [
 ]
 
 
-class MockTransformersBackend:
-    """
-    Mock backend implementing the Backend Protocol.
-    Used for testing and development without real model weights.
-    """
+class MockTransformersBackend(BackendBase):
 
-    def __init__(
-        self,
-        model_name: str = "mock-model",
-        model_path: Optional[str] = None,
-        device: str = "cpu",
-    ):
+    def __init__(self, model_name: str = "mock-model"):
         self.model_name = model_name
-        self.model_path = model_path
-        self.device = device
-        self.tokenizer = MockTokenizer()
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
-        count = 0
+        count: float = 0
         for char in text:
             if "\u4e00" <= char <= "\u9fff":
                 count += 1.5

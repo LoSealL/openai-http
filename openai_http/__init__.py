@@ -1,10 +1,7 @@
-"""
-OpenAI-Compatible HTTP API Service
+__version__ = "0.2.0"
 
-A production-ready OpenAI v1 API-compatible HTTP service backed by
-HuggingFace Transformers for inference. Supports all OpenAI v1 endpoints
-with streaming, authentication, observability, and queue-based concurrency.
-"""
+from openai_http._logging import setup_logging
+from openai_http._server import run_server
+from openai_http.backends.base import BackendBase
 
-__version__ = "0.1.0"
-__api_version__ = "v1"
+__all__ = ["BackendBase", "__version__", "run_server", "setup_logging"]

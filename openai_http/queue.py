@@ -22,7 +22,7 @@ class RequestQueue:
 
     def __init__(self, max_depth: int = 32, retry_after: int = 5):
         self.semaphore = asyncio.Semaphore(1)
-        self.queue = asyncio.Queue(maxsize=max_depth)
+        self.queue: asyncio.Queue[int] = asyncio.Queue(maxsize=max_depth)
         self.active_count = 0
         self.retry_after = retry_after
 
