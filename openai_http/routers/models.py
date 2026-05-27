@@ -5,14 +5,14 @@ GET /v1/models         - list all available models
 GET /v1/models/{id}    - retrieve a specific model
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from openai_http.schemas.models import Model, ModelListResponse
+from openai_http.auth import verify_api_key
 from openai_http.errors import NotFoundError
 
 
-router = APIRouter(tags=["Models"])
+router = APIRouter(tags=["Models"], dependencies=[Depends(verify_api_key)])
 
 
 @router.get("/v1/models")

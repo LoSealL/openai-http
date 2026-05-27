@@ -4,7 +4,6 @@ Health endpoint.
 GET /health - health check (200 if ready, 503 if not)
 """
 
-import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 

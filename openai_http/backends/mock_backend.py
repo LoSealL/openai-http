@@ -5,12 +5,11 @@ Implements the Backend Protocol using mock data and simple token estimation.
 No real model weights are loaded.
 """
 
-import time
+import json
 import random
 import asyncio
 from typing import AsyncGenerator, Optional, Any
 
-from openai_http.backends.base import Backend
 
 
 class MockTokenizer:
@@ -202,6 +201,47 @@ class MockTransformersBackend:
             yield chunk
             idx += chunk_size
             await asyncio.sleep(random.uniform(0.01, 0.03))
+
+    async def generate_tool_calls(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        if not tools:
+            return []
+        tool_choice = kwargs.get("tool_choice", "auto")
+        if tool_choice == "none":
+            return []
+
+        if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+            target_name = tool_choice.get("function", {}).get("name")
+            candidates = [t for t in tools if t.get("function", {}).get("name") == target_name]
+        elif tool_choice == "required":
+            candidates = tools
+        else:
+            candidates = tools
+
+        if not candidates:
+            return []
+
+        selected = candidates[0]
+        func_def = selected.get("function", {})
+        func_name = func_def.get("name", "unknown_function")
+        params = func_def.get("parameters", {})
+        props = params.get("properties", {})
+        fake_args = {k: "mock_value" for k in props}
+
+        return [
+            {
+                "id": f"call_{random.randbytes(6).hex()}",
+                "type": "function",
+                "function": {
+                    "name": func_name,
+                    "arguments": json.dumps(fake_args),
+                },
+            }
+        ]
 
     async def embed(
         self,

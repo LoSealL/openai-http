@@ -10,7 +10,6 @@ Creates and configures the FastAPI application with:
 - Request queue
 """
 
-import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,10 +85,14 @@ def create_app(config: Settings | None = None) -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
 
     # Register routers
-    from openai_http.routers import chat, models, health
+    from openai_http.routers import chat, models, health, completions, embeddings, audio, images
 
     app.include_router(chat.router)
     app.include_router(models.router)
     app.include_router(health.router)
+    app.include_router(completions.router)
+    app.include_router(embeddings.router)
+    app.include_router(audio.router)
+    app.include_router(images.router)
 
     return app

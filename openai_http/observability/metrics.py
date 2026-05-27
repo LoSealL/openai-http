@@ -4,7 +4,6 @@ OpenTelemetry metrics instruments.
 Provides counters, histograms, and gauges for service observability.
 """
 
-from typing import Optional
 
 try:
     from opentelemetry import metrics

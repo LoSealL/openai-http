@@ -7,7 +7,6 @@ Returns 429 when queue is full.
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from openai_http.errors import RateLimitError
 
