@@ -1,0 +1,25 @@
+# OpenAI-Compatible HTTP API Service Configuration
+# Environment variables with OPENAI_HTTP__ prefix override these values
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[backend]
+type = "mock"  # "transformers" for real model inference, "mock" for testing
+# model_path = "Qwen/Qwen2.5-0.5B-Instruct"  # Uncomment for real backend
+device = "auto"  # "cuda", "cpu", or "auto"
+torch_dtype = "auto"  # "auto", "float16", "bfloat16", "float32"
+
+[auth]
+enabled = false
+api_keys = []  # Add API keys when auth.enabled = true
+
+[queue]
+depth = 32  # Max requests in queue before returning 429
+
+[observability]
+log_level = "info"
+log_format = "json"  # "json" or "text"
+metrics_enabled = true
+metrics_port = 9464

@@ -4,10 +4,32 @@ __pycache__/
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
 
 # Virtual environments
-.venv
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+*.cover
+
+# MyPy
+.mypy_cache/
+
+# Environment
+.env
+*.tmp
 
 .opencode/commands/*
 .specify

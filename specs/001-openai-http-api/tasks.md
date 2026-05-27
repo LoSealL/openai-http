@@ -17,17 +17,17 @@
 
 ## Phase 1: Project Setup & Structure
 
-- [ ] T001 Create `openai_http/` package directory with `__init__.py` exposing version and package metadata
-- [ ] T002 Update `pyproject.toml` with all dependencies: fastapi, uvicorn[standard], pydantic-settings, pydantic>=2.5, transformers, torch, opentelemetry-api, opentelemetry-sdk, opentelemetry-exporter-prometheus (dev: pytest, httpx, openai, ruff, mypy)
-- [ ] T003 [P] Create `openai_http/config.py` with `pydantic-settings` `Settings` class merging TOML (`config.toml`) and environment variables (model path, api_keys, host, port, backend, queue_depth, auth_enabled)
-- [ ] T004 [P] Create `config.toml` with sensible defaults (host 0.0.0.0, port 8000, backend "mock", queue_depth 32, auth_enabled false, empty api_keys list)
-- [ ] T005 Create `openai_http/app.py` with FastAPI factory `create_app()` using lifespan, CORS middleware, and config injection into `app.state`
-- [ ] T006 [P] Create `openai_http/__main__.py` entry point using `create_app()` + `uvicorn.run`
-- [ ] T007 [P] Create `tests/` directory tree: `conftest.py`, `unit/`, `integration/`, `contract/` with `__init__.py` in each
-- [ ] T008 Create `tests/conftest.py` with shared fixtures: `test_client` (httpx.AsyncClient), `mock_backend`, `app` (create_app with mock config)
-- [ ] T009 [P] Create `openai_http/schemas/__init__.py` for centralized schema exports
-- [ ] T010 [P] Create `openai_http/routers/__init__.py` for centralized router registration
-- [ ] T011 [P] Create `openai_http/backends/__init__.py` with `BackendFactory` and backend registry function
+- [x] T001 Create `openai_http/` package directory with `__init__.py` exposing version and package metadata
+- [x] T002 Update `pyproject.toml` with all dependencies: fastapi, uvicorn[standard], pydantic-settings, pydantic>=2.5, transformers, torch, opentelemetry-api, opentelemetry-sdk, opentelemetry-exporter-prometheus (dev: pytest, httpx, openai, ruff, mypy)
+- [x] T003 [P] Create `openai_http/config.py` with `pydantic-settings` `Settings` class merging TOML (`config.toml`) and environment variables (model path, api_keys, host, port, backend, queue_depth, auth_enabled)
+- [x] T004 [P] Create `config.toml` with sensible defaults (host 0.0.0.0, port 8000, backend "mock", queue_depth 32, auth_enabled false, empty api_keys list)
+- [x] T005 Create `openai_http/app.py` with FastAPI factory `create_app()` using lifespan, CORS middleware, and config injection into `app.state`
+- [x] T006 [P] Create `openai_http/__main__.py` entry point using `create_app()` + `uvicorn.run`
+- [x] T007 [P] Create `tests/` directory tree: `conftest.py`, `unit/`, `integration/`, `contract/` with `__init__.py` in each
+- [x] T008 Create `tests/conftest.py` with shared fixtures: `test_client` (httpx.AsyncClient), `mock_backend`, `app` (create_app with mock config)
+- [x] T009 [P] Create `openai_http/schemas/__init__.py` for centralized schema exports
+- [x] T010 [P] Create `openai_http/routers/__init__.py` for centralized router registration
+- [x] T011 [P] Create `openai_http/backends/__init__.py` with `BackendFactory` and backend registry function
 
 ---
 
@@ -35,17 +35,17 @@
 
 > **MUST complete before any user story task begins.**
 
-- [ ] T012 Create `openai_http/errors.py` with `OpenAIError` base exception class carrying `message`, `type`, `param`, `code` fields and mapping to HTTP status codes (400, 401, 404, 429, 500)
-- [ ] T013 Add global FastAPI exception handlers in `openai_http/errors.py` that convert `OpenAIError`, `RequestValidationError`, `HTTPException`, and unhandled `Exception` into OpenAI-format `{"error": {"message", "type", "param", "code"}}` JSON responses
-- [ ] T014 Catch 404 for undefined routes and return structured OpenAI error response (not HTML) via `app.add_exception_handler(404, ...)`
-- [ ] T015 [P] Create `openai_http/schemas/common.py` with `UsageInfo` model (`prompt_tokens`, `completion_tokens`, `total_tokens`) and `ErrorResponse` model
-- [ ] T016 [P] Create `openai_http/queue.py` with `RequestQueue` class: `asyncio.Semaphore(1)` for GPU serialization + `asyncio.Queue(maxsize=queue_depth)` for FIFO bound, with `acquire()` context manager (raises 429 `TooManyRequestsError` with `Retry-After` header on overflow)
-- [ ] T017 Inject `RequestQueue` into `app.state` during lifespan startup
-- [ ] T018 [P] Create `openai_http/backends/base.py` with `Backend` Protocol class defining: `generate()` -> dict, `generate_stream()` -> AsyncGenerator, `embed()` -> list, `list_models()` -> list, `get_model()` -> Model
-- [ ] T019 [P] Create `openai_http/backends/mock_backend.py` migrating existing `MockTransformersBackend` and `MockTokenizer` from root `mock_backend.py` to implement the Protocol; include `embed()` method
-- [ ] T020 [P] Create `openai_http/observability/logging.py` with structured JSON logging formatter, request ID middleware (generate `X-Request-ID`), and request/response logging (model, latency, status, token counts)
-- [ ] T021 [P] Create `openai_http/observability/metrics.py` with OpenTelemetry instruments: `request_counter`, `request_duration_histogram`, `tokens_generated_counter`, `error_counter` (by type), `active_requests_gauge`
-- [ ] T022 Register observability middleware and request ID injection in `openai_http/app.py` factory
+- [x] T012 Create `openai_http/errors.py` with `OpenAIError` base exception class carrying `message`, `type`, `param`, `code` fields and mapping to HTTP status codes (400, 401, 404, 429, 500)
+- [x] T013 Add global FastAPI exception handlers in `openai_http/errors.py` that convert `OpenAIError`, `RequestValidationError`, `HTTPException`, and unhandled `Exception` into OpenAI-format `{"error": {"message", "type", "param", "code"}}` JSON responses
+- [x] T014 Catch 404 for undefined routes and return structured OpenAI error response (not HTML) via `app.add_exception_handler(404, ...)`
+- [x] T015 [P] Create `openai_http/schemas/common.py` with `UsageInfo` model (`prompt_tokens`, `completion_tokens`, `total_tokens`) and `ErrorResponse` model
+- [x] T016 [P] Create `openai_http/queue.py` with `RequestQueue` class: `asyncio.Semaphore(1)` for GPU serialization + `asyncio.Queue(maxsize=queue_depth)` for FIFO bound, with `acquire()` context manager (raises 429 `TooManyRequestsError` with `Retry-After` header on overflow)
+- [x] T017 Inject `RequestQueue` into `app.state` during lifespan startup
+- [x] T018 [P] Create `openai_http/backends/base.py` with `Backend` Protocol class defining: `generate()` -> dict, `generate_stream()` -> AsyncGenerator, `embed()` -> list, `list_models()` -> list, `get_model()` -> Model
+- [x] T019 [P] Create `openai_http/backends/mock_backend.py` migrating existing `MockTransformersBackend` and `MockTokenizer` from root `mock_backend.py` to implement the Protocol; include `embed()` method
+- [x] T020 [P] Create `openai_http/observability/logging.py` with structured JSON logging formatter, request ID middleware (generate `X-Request-ID`), and request/response logging (model, latency, status, token counts)
+- [x] T021 [P] Create `openai_http/observability/metrics.py` with OpenTelemetry instruments: `request_counter`, `request_duration_histogram`, `tokens_generated_counter`, `error_counter` (by type), `active_requests_gauge`
+- [x] T022 Register observability middleware and request ID injection in `openai_http/app.py` factory
 - [ ] T023 [P] Write unit tests `tests/unit/test_errors.py` verifying all error format conversions (400, 401, 404, 429, 500)
 - [ ] T024 [P] Write unit tests `tests/unit/test_queue.py` verifying FIFO order, semaphore enforcement, 429 on overflow
 - [ ] T025 [P] Write unit tests `tests/unit/test_config.py` verifying TOML loading, env var override precedence
@@ -62,15 +62,15 @@
 
 ### Implementation
 
-- [ ] T026 [P] [US1] Create `openai_http/schemas/chat.py` with Pydantic request models: `ChatMessage` (role, content, name, tool_calls, tool_call_id), `ChatCompletionRequest` (all FR-001 fields: model, messages, temperature, top_p, n, stream, stop, max_tokens, presence_penalty, frequency_penalty, logit_bias, logprobs, top_logprobs, response_format, tools, tool_choice, user, seed, stream_options) using `ConfigDict(extra="allow")`
-- [ ] T027 [US1] Add response models in `openai_http/schemas/chat.py`: `ChatCompletionResponse` (id `chatcmpl-*`, object, created, model, choices, usage, system_fingerprint, service_tier), `ChatCompletionChunk` (object `chat.completion.chunk`), `Choice`, `ChunkChoice` (with delta containing role/content/tool_calls)
-- [ ] T028 [US1] Create `openai_http/routers/chat.py` with `POST /v1/chat/completions` router handling non-stream mode: acquire queue, call `backend.generate()`, return JSONResponse matching `ChatCompletionResponse` schema with `chatcmpl-*` id and usage
-- [ ] T029 [US1] Implement streaming mode in `openai_http/routers/chat.py`: acquire queue, call `backend.generate_stream()`, yield SSE chunks via `StreamingResponse` with `text/event-stream` media type and correct headers (`Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`)
-- [ ] T030 [US1] Ensure SSE output emits first chunk with `{"role": "assistant"}` delta, content chunks via backend stream, final chunk with `finish_reason` and usage (when `stream_options.include_usage = true`), terminated by `data: [DONE]\n\n`
-- [ ] T031 [US1] Add model validation in `openai_http/routers/chat.py`: return 404 with `invalid_request_error` if requested model not in `backend.list_models()`
-- [ ] T032 [US1] Add request parameter validation: reject `max_tokens <= 0` with 400, silently ignore unknown parameters via `extra="allow"`, handle `stop` as string or array
-- [ ] T033 [US1] Handle streaming connection drops: ensure backend resources are cleaned up (cancel backend thread/generation) via `try/finally` in stream generator
-- [ ] T034 [US1] Wrap backend errors (OOM, CUDA, timeout) in stream generator to emit formatted error SSE event and close stream, not leave orphaned connections
+- [x] T026 [P] [US1] Create `openai_http/schemas/chat.py` with Pydantic request models: `ChatMessage` (role, content, name, tool_calls, tool_call_id), `ChatCompletionRequest` (all FR-001 fields: model, messages, temperature, top_p, n, stream, stop, max_tokens, presence_penalty, frequency_penalty, logit_bias, logprobs, top_logprobs, response_format, tools, tool_choice, user, seed, stream_options) using `ConfigDict(extra="allow")`
+- [x] T027 [US1] Add response models in `openai_http/schemas/chat.py`: `ChatCompletionResponse` (id `chatcmpl-*`, object, created, model, choices, usage, system_fingerprint, service_tier), `ChatCompletionChunk` (object `chat.completion.chunk`), `Choice`, `ChunkChoice` (with delta containing role/content/tool_calls)
+- [x] T028 [US1] Create `openai_http/routers/chat.py` with `POST /v1/chat/completions` router handling non-stream mode: acquire queue, call `backend.generate()`, return JSONResponse matching `ChatCompletionResponse` schema with `chatcmpl-*` id and usage
+- [x] T029 [US1] Implement streaming mode in `openai_http/routers/chat.py`: acquire queue, call `backend.generate_stream()`, yield SSE chunks via `StreamingResponse` with `text/event-stream` media type and correct headers (`Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`)
+- [x] T030 [US1] Ensure SSE output emits first chunk with `{"role": "assistant"}` delta, content chunks via backend stream, final chunk with `finish_reason` and usage (when `stream_options.include_usage = true`), terminated by `data: [DONE]\n\n`
+- [x] T031 [US1] Add model validation in `openai_http/routers/chat.py`: return 404 with `invalid_request_error` if requested model not in `backend.list_models()`
+- [x] T032 [US1] Add request parameter validation: reject `max_tokens <= 0` with 400, silently ignore unknown parameters via `extra="allow"`, handle `stop` as string or array
+- [x] T033 [US1] Handle streaming connection drop: ensure backend resources are cleaned up (cancel backend thread/generation) via `try/finally` in stream generator
+- [x] T034 [US1] Wrap backend errors (OOM, CUDA, timeout) in stream generator to emit formatted error SSE event and close stream, not leave orphaned connections
 - [ ] T035 [P] [US1] Write integration tests `tests/integration/test_chat_completions.py`: non-stream response schema validation, stream chunk format validation, `data: [DONE]` termination, invalid model 404
 - [ ] T036 [P] [US1] Write contract test `tests/contract/test_openai_sdk.py` verifying `openai` Python SDK `client.chat.completions.create()` (both stream=false and stream=true) works against the service using `base_url` parameter
 
@@ -86,9 +86,9 @@
 
 ### Implementation
 
-- [ ] T037 [P] [US3] Create `openai_http/schemas/models.py` with `ModelObject` (id, object literal `"model"`, created, owned_by) and `ModelList` (object literal `"list"`, data array) Pydantic models
-- [ ] T038 [US3] Create `openai_http/routers/models.py` with `GET /v1/models` returning `ModelList` from `backend.list_models()`, and `GET /v1/models/{model_id}` returning `ModelObject` or 404 with OpenAI error format
-- [ ] T039 [US3] Register models router in `openai_http/app.py` factory
+- [x] T037 [P] [US3] Create `openai_http/schemas/models.py` with `ModelObject` (id, object literal `"model"`, created, owned_by) and `ModelList` (object literal `"list"`, data array) Pydantic models
+- [x] T038 [US3] Create `openai_http/routers/models.py` with `GET /v1/models` returning `ModelList` from `backend.list_models()`, and `GET /v1/models/{model_id}` returning `ModelObject` or 404 with OpenAI error format
+- [x] T039 [US3] Register models router in `openai_http/app.py` factory
 - [ ] T040 [P] [US3] Write integration tests `tests/integration/test_models.py`: list models, retrieve specific model, 404 for nonexistent model
 
 **Checkpoint**: US3 complete — model auto-discovery works
