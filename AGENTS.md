@@ -59,10 +59,10 @@ Single-package service `openai_http/` with layered modules:
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
 
-**Plan**: `specs/001-openai-http-api/plan.md`
-**Spec**: `specs/001-openai-http-api/spec.md`
-**Research**: `specs/001-openai-http-api/research.md`
-**Data Model**: `specs/001-openai-http-api/data-model.md`
-**API Contract**: `specs/001-openai-http-api/contracts/openai-v1-api.yaml`
-**Quickstart**: `specs/001-openai-http-api/quickstart.md`
+**Plan**: `specs/002-extensible-backend-sdk/plan.md`
+**Spec**: `specs/002-extensible-backend-sdk/spec.md`
+**Research**: `specs/002-extensible-backend-sdk/research.md`
+**Data Model**: `specs/002-extensible-backend-sdk/data-model.md`
+**API Contract**: `specs/002-extensible-backend-sdk/contracts/python-api.md`
+**Quickstart**: `specs/002-extensible-backend-sdk/quickstart.md`
 <!-- SPECKIT END -->
