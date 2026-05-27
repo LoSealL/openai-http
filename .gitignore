@@ -34,3 +34,4 @@ htmlcov/
 .opencode/commands/*
 .specify
 # specs/*
+uv.lock
