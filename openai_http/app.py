@@ -21,10 +21,11 @@ async def lifespan(app: FastAPI):
     injected = getattr(app.state, "_injected_backend", None)
     if injected is not None:
         app.state.backend = injected
-        try:
-            await injected.setup()
-        except Exception as e:
-            raise RuntimeError(f"Backend setup failed: {e}") from e
+        if not getattr(injected, "_openai_http_initialized", False):
+            try:
+                await injected.setup()
+            except Exception as e:
+                raise RuntimeError(f"Backend setup failed: {e}") from e
     else:
         from openai_http.backends.mock_backend import MockTransformersBackend
 
@@ -80,7 +81,15 @@ def create_app(
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
-    from openai_http.routers import audio, chat, completions, embeddings, health, images, models
+    from openai_http.routers import (
+        audio,
+        chat,
+        completions,
+        embeddings,
+        health,
+        images,
+        models,
+    )
 
     app.include_router(chat.router)
     app.include_router(models.router)

@@ -1,0 +1,206 @@
+"""
+A real HuggingFace Transformers backend for openai_http.
+
+Loads a causal LM (default: Qwen/Qwen2.5-0.5B-Instruct) and serves
+chat completions with proper chat template handling and streaming.
+
+Run:
+    uv run python examples/transformers-backend/transformers_backend.py
+
+Dependencies:
+    uv pip install torch transformers accelerate
+"""
+
+import asyncio
+import time
+from threading import Thread
+from typing import Any, AsyncGenerator, Optional
+
+import torch
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    TextIteratorStreamer,
+)
+
+import openai_http
+from openai_http.backends.base import BackendBase
+
+
+DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+
+
+class TransformersBackend(BackendBase):
+    def __init__(self, model_id: str = DEFAULT_MODEL):
+        self.model_id = model_id
+        self.tokenizer = None
+        self.model = None
+        self.device = None
+        self._loaded_at: int | None = None
+
+    async def setup(self) -> None:
+        def _load():
+            device = (
+                "cuda"
+                if torch.cuda.is_available()
+                else ("mps" if torch.backends.mps.is_available() else "cpu")
+            )
+            dtype = torch.bfloat16 if device != "cpu" else torch.float32
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.model_id,
+                trust_remote_code=True,
+            )
+            if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+                tokenizer.pad_token_id = tokenizer.eos_token_id
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                torch_dtype=dtype,
+                device_map=device if device != "mps" else None,
+                trust_remote_code=True,
+            )
+            if device == "mps":
+                model = model.to(device)
+            model.eval()
+            return tokenizer, model, device
+
+        self.tokenizer, self.model, self.device = await asyncio.to_thread(_load)
+        self._loaded_at = int(time.time())
+
+    async def teardown(self) -> None:
+        self.model = None
+        self.tokenizer = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        import gc
+
+        gc.collect()
+
+    def _prepare_inputs(self, prompt: str | list[dict[str, str]], max_new_tokens: int):
+        if isinstance(prompt, list):
+            messages = prompt
+        else:
+            messages = [{"role": "user", "content": prompt}]
+
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        prompt_len = inputs["input_ids"].shape[1]
+        return inputs, prompt_len, messages
+
+    def _decode_output(self, input_ids_len: int, output_ids) -> tuple[str, int]:
+        new_ids = output_ids[0, input_ids_len:]
+        text = self.tokenizer.decode(new_ids, skip_special_tokens=True)
+        return text, len(new_ids)
+
+    async def generate(
+        self,
+        prompt: str | list[dict[str, str]],
+        **kwargs: Any,
+    ) -> dict:
+        max_new_tokens = int(kwargs.get("max_tokens", 256))
+        temperature = float(kwargs.get("temperature", 0.7))
+
+        def _sync_generate():
+            inputs, prompt_len, _ = self._prepare_inputs(prompt, max_new_tokens)
+            gen_kwargs = {
+                **inputs,
+                "max_new_tokens": max_new_tokens,
+                "do_sample": temperature > 0,
+                "pad_token_id": self.tokenizer.pad_token_id,
+            }
+            if temperature > 0:
+                gen_kwargs["temperature"] = temperature
+                if "top_p" in kwargs:
+                    gen_kwargs["top_p"] = float(kwargs["top_p"])
+            with torch.no_grad():
+                output_ids = self.model.generate(**gen_kwargs)
+            return inputs, prompt_len, output_ids
+
+        inputs, prompt_len, output_ids = await asyncio.to_thread(_sync_generate)
+        generated_text, completion_tokens = self._decode_output(prompt_len, output_ids)
+
+        return {
+            "generated_text": generated_text,
+            "usage": {
+                "prompt_tokens": prompt_len,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_len + completion_tokens,
+            },
+        }
+
+    async def generate_stream(
+        self,
+        prompt: str | list[dict[str, str]],
+        **kwargs: Any,
+    ) -> AsyncGenerator[str, None]:
+        max_new_tokens = int(kwargs.get("max_tokens", 256))
+        temperature = float(kwargs.get("temperature", 0.7))
+
+        inputs, _, _ = self._prepare_inputs(prompt, max_new_tokens)
+        streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+        )
+
+        gen_kwargs = {
+            **inputs,
+            "max_new_tokens": max_new_tokens,
+            "do_sample": temperature > 0,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "streamer": streamer,
+        }
+        if temperature > 0:
+            gen_kwargs["temperature"] = temperature
+            if "top_p" in kwargs:
+                gen_kwargs["top_p"] = float(kwargs["top_p"])
+
+        chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _producer():
+            gen_thread = Thread(target=self.model.generate, kwargs=dict(gen_kwargs))
+            gen_thread.start()
+            try:
+                for text in streamer:
+                    if text:
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, text)
+            finally:
+                gen_thread.join()
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+        loop.run_in_executor(None, _producer)
+
+        while True:
+            chunk = await chunk_queue.get()
+            if chunk is None:
+                break
+            yield chunk
+
+    async def list_models(self) -> list[dict]:
+        return [
+            {
+                "id": self.model_id,
+                "object": "model",
+                "created": self._loaded_at or int(time.time()),
+                "owned_by": "huggingface",
+            }
+        ]
+
+    async def get_model(self, model_id: str) -> Optional[dict]:
+        if model_id != self.model_id:
+            return None
+        return {
+            "id": self.model_id,
+            "object": "model",
+            "created": self._loaded_at or int(time.time()),
+            "owned_by": "huggingface",
+        }
+
+
+if __name__ == "__main__":
+    backend = TransformersBackend(model_id=DEFAULT_MODEL)
+    openai_http.run_server(backend=backend, port=8000)

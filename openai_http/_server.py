@@ -32,6 +32,8 @@ def run_server(
 
     if not skip_validation:
         try:
+            asyncio.run(backend.setup())
+            backend._openai_http_initialized = True
             asyncio.run(validate_backend(backend))
         except BackendValidationError as e:
             print(f"Backend validation failed: {e}", file=sys.stderr)
