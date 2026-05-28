@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openai-http"
-version = "0.1.0"
+dynamic = ["version"]
 description = "OpenAI v1 API-compatible HTTP service backed by HuggingFace Transformers"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,6 +21,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["openai_http*"]
 exclude = ["tests*", "specs*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "openai_http.__version__"}
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

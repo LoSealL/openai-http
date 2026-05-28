@@ -4,16 +4,18 @@ OpenAI v1 API compatible HTTP service with pluggable inference backends. Built w
 
 ## Features
 
-- ✅ OpenAI v1 API compatibility (Models, Chat Completions)
+- ✅ OpenAI v1 API compatibility (Models, Chat Completions, Completions, Embeddings)
 - ✅ Server-Sent Events (SSE) streaming support
 - ✅ Request queue with GPU serialization (prevents concurrent GPU access)
 - ✅ TOML + environment variable configuration
 - ✅ Structured JSON logging with request IDs
 - ✅ OpenTelemetry metrics (Prometheus endpoint)
-- ✅ Mock backend for testing (1536-dim embeddings, streaming chat)
-- 🚧 Transformers backend (Phase 6 - in progress)
-- 🚧 Completions, Embeddings endpoints (Phase 7-8)
-- 🚧 Tool calling, Files API (Phase 9-10)
+- ✅ Mock backend for testing (1536-dim embeddings, streaming chat, tool calls)
+- ✅ Transformers backend example (`examples/transformers-backend/` — uses Qwen2.5-0.5B)
+- ✅ Custom backend SDK (`BackendBase` ABC, `run_server()` entry point)
+- 🚧 Audio (speech, transcriptions, translations) endpoints
+- 🚧 Image generation / editing endpoints
+- 🚧 Tool calling (function definitions in chat)
 
 ## Quick Start
 
@@ -69,6 +71,18 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 curl http://localhost:8000/health
 ```
 
+### Run with a real Transformers backend
+
+```bash
+# Install heavy deps (not included in default install)
+uv pip install torch transformers accelerate
+
+# Start with Qwen2.5-0.5B-Instruct (downloads ~1 GB on first run)
+uv run python examples/transformers-backend/transformers_backend.py
+```
+
+See [`examples/transformers-backend/README.md`](examples/transformers-backend/README.md) for details.
+
 ## Configuration
 
 Configuration uses `config.toml` with environment variable overrides.
@@ -79,11 +93,6 @@ Configuration uses `config.toml` with environment variable overrides.
 [server]
 host = "0.0.0.0"
 port = 8000
-
-[backend]
-type = "mock"  # "mock" or "transformers"
-device = "auto"  # "cuda", "cpu", "auto"
-# model_path = "Qwen/Qwen2.5-0.5B-Instruct"  # for transformers backend
 
 [auth]
 enabled = false
@@ -105,8 +114,6 @@ Override any config with `OPENAI_HTTP__` prefix (double underscore for nesting):
 
 ```bash
 OPENAI_HTTP__SERVER__PORT=9000
-OPENAI_HTTP__BACKEND__TYPE=transformers
-OPENAI_HTTP__BACKEND__MODEL_PATH=Qwen/Qwen2.5-0.5B-Instruct
 OPENAI_HTTP__AUTH__ENABLED=true
 OPENAI_HTTP__AUTH__API_KEYS=["sk-test-key"]
 ```
@@ -118,16 +125,22 @@ OPENAI_HTTP__AUTH__API_KEYS=["sk-test-key"]
 - `GET /v1/models` — List available models
 - `GET /v1/models/{model_id}` — Get model info
 - `POST /v1/chat/completions` — Chat completion (streaming + non-streaming)
+- `POST /v1/completions` — Text completion
+- `POST /v1/embeddings` — Text embeddings
 - `GET /health` — Health check
 
-### Planned (by phase)
+### Stub endpoints (registered but return 501)
 
-- **Phase 7**: `POST /v1/embeddings`
-- **Phase 8**: `POST /v1/completions`, `POST /v1/moderations`
-- **Phase 9**: Tool calling (function definitions in chat)
-- **Phase 10**: `POST /v1/files`, file management
-- **Phase 11**: `POST /v1/fine_tuning/jobs`
-- **Phase 12**: Batch API
+- `POST /v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/audio/translations`
+- `POST /v1/images/generations`, `/v1/images/edits`, `/v1/images/variations`
+
+### Planned
+
+- Tool calling (function definitions in chat)
+- `POST /v1/moderations`
+- `POST /v1/files`, file management
+- `POST /v1/fine_tuning/jobs`
+- Batch API
 
 ## Development
 
@@ -160,31 +173,37 @@ uv run mypy openai_http/
 
 ```
 openai_http/
+├── __init__.py         # Public API: BackendBase, run_server, setup_logging
+├── _server.py          # run_server() entry point (library mode)
 ├── app.py              # FastAPI factory, lifespan, middleware
 ├── config.py           # pydantic-settings configuration
 ├── errors.py           # OpenAI-format error handlers
 ├── queue.py            # Request queue (asyncio.Semaphore)
 ├── routers/            # API endpoints
 │   ├── chat.py        # /v1/chat/completions
+│   ├── completions.py # /v1/completions
+│   ├── embeddings.py  # /v1/embeddings
 │   ├── models.py      # /v1/models
+│   ├── audio.py       # /v1/audio/* (stub)
+│   ├── images.py      # /v1/images/* (stub)
 │   └── health.py      # /health
 ├── schemas/            # Pydantic v2 models
 ├── backends/           # Inference backends
-│   ├── base.py        # Backend Protocol
+│   ├── base.py        # BackendBase ABC
 │   └── mock_backend.py # Mock implementation
-├── services/           # Business logic (planned)
 └── observability/      # Logging + metrics
+
+examples/
+└── transformers-backend/  # Real Transformers backend using Qwen2.5-0.5B
 
 tests/
 ├── conftest.py         # Async httpx fixtures
 ├── unit/              # Unit tests
-├── integration/       # Integration tests
-├── contract/          # Contract tests
 └── sdk/               # OpenAI SDK compatibility tests
     └── conftest.py    # Sync OpenAI client fixtures
 
 config.toml            # Configuration
-specs/001-openai-http-api/  # Specification & planning
+specs/                 # Feature specs & plans
 ```
 
 ## Architecture
@@ -199,18 +218,45 @@ specs/001-openai-http-api/  # Specification & planning
 6. Response formatted to OpenAI v1 schema
 7. Error handlers catch exceptions and format `{"error": {...}}`
 
-### Backend Protocol
+### Custom backends
 
-All backends implement the `Backend` Protocol in `backends/base.py`:
+Create your own backend by subclassing `BackendBase` and plugging it into `run_server()`:
 
 ```python
-class Backend(Protocol):
-    async def generate(self, prompt: str | list[dict], **kwargs) -> dict
-    async def generate_stream(self, prompt: str | list[dict], **kwargs) -> AsyncGenerator[str, None]
-    async def embed(self, texts: list[str], **kwargs) -> list[list[float]]
-    async def list_models(self) -> list[dict]
-    async def get_model(self, model_id: str) -> Optional[dict]
+import openai_http
+
+class MyBackend(openai_http.BackendBase):
+    async def generate(self, prompt, **kwargs):
+        return {"generated_text": "...", "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
+
+    async def generate_stream(self, prompt, **kwargs):
+        yield "Hello"
+        yield " world"
+
+    async def list_models(self):
+        return [{"id": "my-model", "object": "model", "created": 0, "owned_by": "me"}]
+
+    async def get_model(self, model_id):
+        return {"id": model_id, "object": "model", "created": 0, "owned_by": "me"} if model_id == "my-model" else None
+
+openai_http.run_server(MyBackend(), port=8000)
 ```
+
+See `examples/transformers-backend/` for a full working implementation.
+
+### Built-in Backend Protocol
+
+All backends subclass `BackendBase` (defined in `backends/base.py`):
+
+| Method | Required | Purpose |
+|--------|----------|---------|
+| `generate()` | ✅ | Non-streaming completion |
+| `generate_stream()` | ✅ | Streaming completion (yields `str` chunks) |
+| `list_models()` | ✅ | List available models |
+| `get_model()` | ✅ | Get a model by ID |
+| `embed()` | ❌ | Embeddings (default → HTTP 501) |
+| `generate_tool_calls()` | ❌ | Tool/function calling (default → HTTP 501) |
+| `setup()` / `teardown()` | ❌ | Lifecycle hooks (default no-op) |
 
 ### Request Queue
 
