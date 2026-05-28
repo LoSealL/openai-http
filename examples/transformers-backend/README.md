@@ -35,10 +35,61 @@ model download (cached in `~/.cache/huggingface/`).
 
 ## Try it
 
+### Basic chat completion
+
 ```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"Qwen/Qwen2.5-0.5B-Instruct","messages":[{"role":"user","content":"Hello!"}]}'
+```
+
+### Tool calling
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get current weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {"type": "string", "description": "City name"}
+            },
+            "required": ["city"]
+          }
+        }
+      }
+    ],
+    "tool_choice": "auto"
+  }'
+```
+
+Returns:
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_...",
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "arguments": "{\"city\": \"Paris\"}"
+        }
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }]
+}
 ```
 
 With the OpenAI Python SDK:
@@ -78,5 +129,7 @@ for chunk in stream:
 - To use a different model, edit `DEFAULT_MODEL` in
   `transformers_backend.py`. Note that some models (e.g. Llama 2)
   require `huggingface-cli login` for access.
-- Tool calling and embeddings are not implemented — requests to those
-  endpoints return HTTP 501.
+- **Tool calling** is implemented via Qwen2.5's built-in tool support
+  (`apply_chat_template` with `tools=` parameter). Pass `tools` and
+  `tool_choice` in the chat completion request.
+- **Embeddings** are not implemented — requests return HTTP 501.

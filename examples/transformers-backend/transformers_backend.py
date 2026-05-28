@@ -12,7 +12,10 @@ Dependencies:
 """
 
 import asyncio
+import json
+import re
 import time
+import uuid
 from threading import Thread
 from typing import Any, AsyncGenerator, Optional
 
@@ -179,6 +182,78 @@ class TransformersBackend(BackendBase):
             if chunk is None:
                 break
             yield chunk
+
+    async def generate_tool_calls(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        tool_choice = kwargs.get("tool_choice", "auto")
+        if tool_choice == "none":
+            return []
+
+        tc_for_template = tool_choice
+        if isinstance(tool_choice, dict):
+            func_name = tool_choice.get("function", {}).get("name")
+            if func_name:
+                tc_for_template = func_name
+
+        def _sync_generate():
+            text = self.tokenizer.apply_chat_template(
+                messages,
+                tools=tools,
+                tool_choice=tc_for_template if tc_for_template != "auto" else None,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+
+            gen_kwargs = {
+                **inputs,
+                "max_new_tokens": 512,
+                "do_sample": False,
+                "pad_token_id": self.tokenizer.pad_token_id,
+            }
+            with torch.no_grad():
+                output_ids = self.model.generate(**gen_kwargs)
+
+            prompt_len = inputs["input_ids"].shape[1]
+            generated_text = self.tokenizer.decode(
+                output_ids[0, prompt_len:],
+                skip_special_tokens=True,
+            )
+            return generated_text
+
+        generated_text = await asyncio.to_thread(_sync_generate)
+        return self._parse_tool_calls(generated_text)
+
+    @staticmethod
+    def _parse_tool_calls(text: str) -> list[dict[str, Any]]:
+        pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+        matches = re.findall(pattern, text, re.DOTALL)
+
+        if not matches:
+            return []
+
+        tool_calls = []
+        for match in matches:
+            try:
+                call = json.loads(match.strip())
+                tool_calls.append(
+                    {
+                        "id": f"call_{uuid.uuid4().hex[:24]}",
+                        "type": "function",
+                        "function": {
+                            "name": call.get("name", ""),
+                            "arguments": json.dumps(call.get("arguments", {})),
+                        },
+                    }
+                )
+            except json.JSONDecodeError:
+                continue
+
+        return tool_calls
 
     async def list_models(self) -> list[dict]:
         return [

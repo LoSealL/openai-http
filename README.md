@@ -15,7 +15,7 @@ OpenAI v1 API compatible HTTP service with pluggable inference backends. Built w
 - ✅ Custom backend SDK (`BackendBase` ABC, `run_server()` entry point)
 - 🚧 Audio (speech, transcriptions, translations) endpoints
 - 🚧 Image generation / editing endpoints
-- 🚧 Tool calling (function definitions in chat)
+- ✅ Tool calling (function definitions in chat) — supported in transformers backend
 
 ## Quick Start
 
@@ -136,7 +136,7 @@ OPENAI_HTTP__AUTH__API_KEYS=["sk-test-key"]
 
 ### Planned
 
-- Tool calling (function definitions in chat)
+- Audio / image generation (currently return 501)
 - `POST /v1/moderations`
 - `POST /v1/files`, file management
 - `POST /v1/fine_tuning/jobs`
