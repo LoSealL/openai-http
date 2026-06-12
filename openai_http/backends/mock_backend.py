@@ -20,16 +20,33 @@ No real model weights are loaded.
 """
 
 import asyncio
+import base64
+import io
 import json
 import random
+import re
 from typing import Any, AsyncGenerator, Optional
+
+from PIL import Image
 
 from openai_http.backends.base import BackendBase
 
+_DATA_URI_RE = re.compile(r"^data:(image/\w+);base64,(.+)$")
+
 
 AVAILABLE_MODELS = [
-    {"id": "mock-gpt", "object": "model", "created": 1677610602, "owned_by": "mock-org"},
-    {"id": "mock-llama", "object": "model", "created": 1677610602, "owned_by": "mock-org"},
+    {
+        "id": "mock-gpt",
+        "object": "model",
+        "created": 1677610602,
+        "owned_by": "mock-org",
+    },
+    {
+        "id": "mock-llama",
+        "object": "model",
+        "created": 1677610602,
+        "owned_by": "mock-org",
+    },
 ]
 
 
@@ -47,6 +64,48 @@ class MockTransformersBackend(BackendBase):
             model_name: The model identifier string.
         """
         self.model_name = model_name
+
+    @staticmethod
+    def _decode_image(b64_data: str) -> dict[str, Any]:
+        try:
+            decoded = base64.b64decode(b64_data, validate=True)
+        except Exception:
+            return {"_type": "image", "format": "unknown", "size_bytes": len(b64_data)}
+        info: dict[str, Any] = {"_type": "image", "size_bytes": len(decoded)}
+        try:
+            img = Image.open(io.BytesIO(decoded))
+            info["format"] = img.format.lower() if img.format else "unknown"
+            info["mode"] = img.mode
+            info["width"] = img.width
+            info["height"] = img.height
+        except ImportError:
+            pass
+        except Exception:
+            info["format"] = "unknown"
+        return info
+
+    @staticmethod
+    def _summarize_value(v: Any) -> Any:
+        if isinstance(v, str):
+            m = _DATA_URI_RE.match(v)
+            if m:
+                return MockTransformersBackend._decode_image(m.group(2))
+            if len(v) > 1000 and re.fullmatch(r"^[A-Za-z0-9+/=]+$", v):
+                return MockTransformersBackend._decode_image(v)
+            return v
+        if isinstance(v, dict):
+            return {
+                k: MockTransformersBackend._summarize_value(v) for k, v in v.items()
+            }
+        if isinstance(v, list):
+            return [MockTransformersBackend._summarize_value(item) for item in v]
+        return v
+
+    def _log_payload(self, method: str, **kwargs) -> None:
+        summary: dict[str, Any] = {"method": method}
+        for k, v in kwargs.items():
+            summary[k] = self._summarize_value(v)
+        print(f"[MockBackend] Payload:\n{json.dumps(summary, indent=2, default=str)}")
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
@@ -106,6 +165,8 @@ class MockTransformersBackend(BackendBase):
         Returns:
             A dict with generated_text and usage token counts.
         """
+        self._log_payload("generate", prompt=prompt, **kwargs)
+
         if isinstance(prompt, list):
             messages = prompt
         else:
@@ -129,12 +190,14 @@ class MockTransformersBackend(BackendBase):
         if temperature > 0.8:
             templates = [
                 f"This is a mock response. Your input was: {last_user_msg[:50]}",
-                f"[Random Mode] You said \"{last_user_msg[:20]}\"... interesting question!",
+                f'[Random Mode] You said "{last_user_msg[:20]}"... interesting question!',
                 f"Mock model response: input length {len(last_user_msg)} chars, temperature={temperature:.2f}.",
             ]
             generated_text = random.choice(templates)
         else:
-            generated_text = f"This is a simulated response. Your input was: {last_user_msg[:50]}"
+            generated_text = (
+                f"This is a simulated response. Your input was: {last_user_msg[:50]}"
+            )
 
         max_chars = int(max_tokens * 3)
         if len(generated_text) > max_chars:
@@ -195,6 +258,10 @@ class MockTransformersBackend(BackendBase):
         Returns:
             A list of tool call dicts with mock argument values.
         """
+        self._log_payload(
+            "generate_tool_calls", messages=messages, tools=tools, **kwargs
+        )
+
         if not tools:
             return []
         tool_choice = kwargs.get("tool_choice", "auto")
@@ -203,7 +270,9 @@ class MockTransformersBackend(BackendBase):
 
         if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
             target_name = tool_choice.get("function", {}).get("name")
-            candidates = [t for t in tools if t.get("function", {}).get("name") == target_name]
+            candidates = [
+                t for t in tools if t.get("function", {}).get("name") == target_name
+            ]
         elif tool_choice == "required":
             candidates = tools
         else:
@@ -246,6 +315,8 @@ class MockTransformersBackend(BackendBase):
         Returns:
             A list of float vectors, one per input text.
         """
+        self._log_payload("embed", texts=texts, **kwargs)
+
         dims = kwargs.get("dimensions", 1536)
         embeddings = []
         for text in texts:
