@@ -1,13 +1,26 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 Tests for OpenAI Chat Completions API.
 
 Tests: client.chat.completions.create() with various parameters
 """
 
 import pytest
-import time
 from .test_base import OpenAITestBase, MOCK_MODELS
-from .mock_data import simple_chat_messages, multi_turn_chat_messages, temperature_params, max_tokens_params
+from .mock_data import simple_chat_messages, multi_turn_chat_messages
 
 
 class TestChatCompletionsSync(OpenAITestBase):
@@ -21,7 +34,6 @@ class TestChatCompletionsSync(OpenAITestBase):
             stream=False
         )
         
-        # Validate response structure
         assert hasattr(response, 'id')
         assert response.id.startswith('chatcmpl-')
         assert hasattr(response, 'object')
@@ -33,13 +45,11 @@ class TestChatCompletionsSync(OpenAITestBase):
         assert len(response.choices) > 0
         assert hasattr(response, 'usage')
         
-        # Validate choice
         choice = response.choices[0]
         self.assert_valid_chat_choice(choice)
         assert choice.message.content is not None
         assert isinstance(choice.message.content, str)
         
-        # Validate usage
         self.assert_valid_usage(response.usage)
     
     def test_chat_completion_multi_turn(self, client):
@@ -88,7 +98,6 @@ class TestChatCompletionsSync(OpenAITestBase):
         )
         
         assert response.object == 'chat.completion'
-        # Mock backend currently returns 1 choice regardless of n
         assert len(response.choices) >= 1
     
     def test_chat_completion_stop_sequences(self, client):
@@ -141,7 +150,6 @@ class TestChatCompletionsSync(OpenAITestBase):
             stream=False
         )
         
-        # Mock backend may not be deterministic, but should accept seed parameter
         assert response1.object == 'chat.completion'
         assert response2.object == 'chat.completion'
     
@@ -176,7 +184,6 @@ class TestChatCompletionsSync(OpenAITestBase):
                 stream=False
             )
         
-        # Should raise validation error
         assert "400" in str(exc_info.value) or "validation" in str(exc_info.value).lower()
 
 
@@ -205,14 +212,11 @@ class TestChatCompletionsStreaming(OpenAITestBase):
         
         assert len(chunks) > 0
         
-        # First chunk should have role
         first_chunk = chunks[0]
         assert len(first_chunk.choices) > 0
         
-        # Last chunk should have finish_reason
         last_chunk = chunks[-1]
         assert len(last_chunk.choices) > 0
-        # finish_reason might be in last or second-to-last chunk
     
     def test_chat_completion_stream_content_accumulation(self, client):
         """Test that streaming content can be accumulated."""
@@ -233,7 +237,6 @@ class TestChatCompletionsStreaming(OpenAITestBase):
     
     def test_chat_completion_stream_vs_non_stream(self, client):
         """Test that stream=True and stream=False both work."""
-        # Non-streaming
         non_stream_response = client.chat.completions.create(
             model=MOCK_MODELS[0],
             messages=simple_chat_messages(),
@@ -241,7 +244,6 @@ class TestChatCompletionsStreaming(OpenAITestBase):
         )
         assert non_stream_response.object == 'chat.completion'
         
-        # Streaming
         stream = client.chat.completions.create(
             model=MOCK_MODELS[0],
             messages=simple_chat_messages(),

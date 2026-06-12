@@ -1,4 +1,18 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 Response schema validators for OpenAI v1 API responses.
 
 Provides validation functions to ensure mock backend responses
@@ -80,7 +94,6 @@ def validate_chat_completion_chunk(chunk: Dict[str, Any]) -> bool:
     for choice in chunk["choices"]:
         if not {"index", "delta", "finish_reason"}.issubset(choice.keys()):
             return False
-        # Delta can have role, content, or tool_calls
         delta = choice["delta"]
         if not isinstance(delta, dict):
             return False
@@ -120,7 +133,6 @@ def validate_embedding(response: Dict[str, Any]) -> bool:
         return False
     if len(response["embedding"]) == 0:
         return False
-    # All elements should be floats
     if not all(isinstance(x, (int, float)) for x in response["embedding"]):
         return False
     return True

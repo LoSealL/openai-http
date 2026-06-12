@@ -1,4 +1,18 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 Configuration module using pydantic-settings.
 
 Supports both TOML config files and environment variables.
@@ -20,25 +34,42 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ServerSettings(BaseSettings):
     """Server configuration."""
+
     host: str = "0.0.0.0"
     port: int = 8000
 
 
 class AuthSettings(BaseSettings):
     """Authentication configuration."""
+
     enabled: bool = False
     api_keys: list[str] = Field(default_factory=list)
 
 
 class QueueSettings(BaseSettings):
-    """Request queue configuration."""
-    depth: int = 32  # Max requests in queue before returning 429
+    """Request queue configuration.
+
+    Controls the maximum number of requests that can wait in the queue
+    before new requests receive a 429 Too Many Requests response.
+    """
+
+    depth: int = 32
 
 
 class ObservabilitySettings(BaseSettings):
-    """Observability configuration."""
+    """Observability configuration.
+
+    Attributes:
+        log_level: Logging verbosity (``"debug"``, ``"info"``,
+            ``"warning"``, ``"error"``, ``"critical"``).
+        log_format: Output format — ``"json"`` for structured JSON or
+            ``"text"`` for plain text logs.
+        metrics_enabled: Whether to expose Prometheus metrics.
+        metrics_port: Port for the metrics HTTP endpoint.
+    """
+
     log_level: str = "info"
-    log_format: str = "json"  # "json" or "text"
+    log_format: str = "json"
     metrics_enabled: bool = True
     metrics_port: int = 9464
 
@@ -90,7 +121,6 @@ class Settings(BaseSettings):
         else:
             toml_data = {}
 
-        # pydantic-settings automatically merges env vars (highest priority)
         return cls(**toml_data)
 
 

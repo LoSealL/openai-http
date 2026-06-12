@@ -1,4 +1,18 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 OpenAI-format error handling.
 
 All exceptions are converted to OpenAI-format error responses with
@@ -7,6 +21,7 @@ appropriate HTTP status codes.
 
 import logging
 from typing import Optional
+
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -15,7 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAIError(HTTPException):
-    """Base OpenAI error with structured response format."""
+    """Base OpenAI error with structured response format.
+
+    All errors produce a JSON body with ``error.message``,
+    ``error.type``, ``error.param``, and ``error.code``.
+
+    Args:
+        message: Human-readable error description.
+        error_type: OpenAI error type string.
+        param: Optional parameter name the error relates to.
+        code: Optional machine-readable error code.
+        status_code: HTTP status code.
+    """
 
     def __init__(
         self,
@@ -41,7 +67,13 @@ class OpenAIError(HTTPException):
 
 
 class InvalidRequestError(OpenAIError):
-    """Invalid request parameters."""
+    """Invalid request parameters (HTTP 400).
+
+    Args:
+        message: Human-readable error description.
+        param: Optional name of the invalid parameter.
+        code: Machine-readable error code.
+    """
 
     def __init__(
         self,
@@ -59,7 +91,12 @@ class InvalidRequestError(OpenAIError):
 
 
 class AuthenticationError(OpenAIError):
-    """Authentication failed."""
+    """Authentication failed (HTTP 401).
+
+    Args:
+        message: Human-readable error description.
+        code: Machine-readable error code.
+    """
 
     def __init__(
         self,
@@ -75,7 +112,12 @@ class AuthenticationError(OpenAIError):
 
 
 class NotFoundError(OpenAIError):
-    """Resource not found."""
+    """Resource not found (HTTP 404).
+
+    Args:
+        message: Human-readable error description.
+        param: Optional name of the resource that was not found.
+    """
 
     def __init__(
         self,
@@ -92,7 +134,12 @@ class NotFoundError(OpenAIError):
 
 
 class RateLimitError(OpenAIError):
-    """Rate limit exceeded."""
+    """Rate limit exceeded (HTTP 429).
+
+    Args:
+        message: Human-readable error description.
+        code: Machine-readable error code.
+    """
 
     def __init__(
         self,
@@ -108,7 +155,11 @@ class RateLimitError(OpenAIError):
 
 
 class NotImplementedOpenAIError(OpenAIError):
-    """Backend does not implement an optional capability."""
+    """Backend does not implement an optional capability (HTTP 501).
+
+    Args:
+        message: Human-readable error description.
+    """
 
     def __init__(
         self,
@@ -128,6 +179,17 @@ def _error_json(
     param: Optional[str] = None,
     code: Optional[str] = None,
 ) -> dict:
+    """Build an OpenAI-format error response body.
+
+    Args:
+        message: Human-readable error description.
+        error_type: OpenAI error type string.
+        param: Optional parameter name the error relates to.
+        code: Optional machine-readable error code.
+
+    Returns:
+        A dict structured as ``{"error": {message, type, param, code}}``.
+    """
     return {
         "error": {
             "message": message,
@@ -139,6 +201,15 @@ def _error_json(
 
 
 async def openai_error_handler(request: Request, exc: OpenAIError) -> JSONResponse:
+    """Handle standard OpenAIError exceptions.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The raised OpenAIError instance.
+
+    Returns:
+        A JSONResponse with the error's status code and body.
+    """
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_json(exc.message, exc.error_type, exc.param, exc.code),
@@ -146,6 +217,15 @@ async def openai_error_handler(request: Request, exc: OpenAIError) -> JSONRespon
 
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Handle Pydantic / FastAPI request validation errors.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The raised RequestValidationError instance.
+
+    Returns:
+        A JSONResponse with HTTP 400 and OpenAI-format error body.
+    """
     errors = exc.errors()
     message = "; ".join(f"{e.get('loc', '')}: {e.get('msg', '')}" for e in errors)
     param = errors[0].get("loc", [None])[-1] if errors else None
@@ -161,6 +241,19 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """Handle generic HTTPException errors.
+
+    If the exception already has an OpenAI-format detail dict it is
+    passed through as-is. Otherwise a new error body is built based on
+    the status code.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The raised HTTPException instance.
+
+    Returns:
+        A JSONResponse with the appropriate status code and error body.
+    """
     if isinstance(exc.detail, dict) and "error" in exc.detail:
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
 
@@ -184,6 +277,15 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 
 async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handle all unhandled exceptions as 500 Internal Server Error.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The unhandled exception.
+
+    Returns:
+        A JSONResponse with HTTP 500 and an internal error body.
+    """
     logger.exception("Unhandled exception")
     return JSONResponse(
         status_code=500,
@@ -196,13 +298,33 @@ async def generic_error_handler(request: Request, exc: Exception) -> JSONRespons
 
 
 def register_error_handlers(app) -> None:
-    """Register all error handlers on the FastAPI app."""
+    """Register all error handlers on the FastAPI app.
+
+    Handlers are registered for:
+    - OpenAIError (custom hierarchy)
+    - RequestValidationError (Pydantic)
+    - HTTPException (FastAPI / Starlette)
+    - Exception (catch-all)
+    - 404 (explicit not-found handler)
+
+    Args:
+        app: The FastAPI application instance.
+    """
     app.add_exception_handler(OpenAIError, openai_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, generic_error_handler)
 
     async def not_found_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        """Handle 404 Not Found responses.
+
+        Args:
+            request: The incoming HTTP request.
+            exc: The raised HTTPException.
+
+        Returns:
+            A JSONResponse with HTTP 404 and an OpenAI-format error body.
+        """
         return JSONResponse(
             status_code=404,
             content=_error_json(

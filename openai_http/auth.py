@@ -1,11 +1,26 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 Bearer token authentication.
 
-Provides FastAPI dependency for `Authorization: Bearer <token>` validation.
+Provides FastAPI dependency for ``Authorization: Bearer <token>`` validation.
 Supports open mode (auth disabled) and multi-key validation.
 """
 
 from typing import Callable, Optional
+
 from fastapi import Request, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -19,6 +34,20 @@ async def verify_api_key(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
 ) -> Optional[str]:
+    """Verify the API key from the request's Authorization header.
+
+    If authentication is disabled in config, returns None immediately.
+
+    Args:
+        request: The incoming HTTP request.
+        credentials: Bearer token credentials extracted by FastAPI.
+
+    Returns:
+        The validated API token string, or None if auth is disabled.
+
+    Raises:
+        AuthenticationError: If the token is missing or invalid.
+    """
     config = request.app.state.config
     if not config.auth.enabled:
         return None
@@ -40,9 +69,33 @@ async def verify_api_key(
 
 
 def create_verify_api_key(config) -> Callable:
+    """Create a config-scoped API key verification dependency.
+
+    Unlike ``verify_api_key`` which reads config from ``request.app.state``,
+    this version captures *config* at creation time.
+
+    Args:
+        config: A settings object with an ``auth`` attribute containing
+            ``enabled`` and ``api_keys``.
+
+    Returns:
+        An async callable suitable for use as a FastAPI dependency.
+    """
+
     async def _verify(
         credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
     ) -> Optional[str]:
+        """Verify the API key using the captured config.
+
+        Args:
+            credentials: Bearer token credentials.
+
+        Returns:
+            The validated API token, or None if auth is disabled.
+
+        Raises:
+            AuthenticationError: If the token is missing or invalid.
+        """
         if not config.auth.enabled:
             return None
 

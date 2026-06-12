@@ -1,4 +1,18 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 SDK test fixtures — overrides the parent tests/conftest.py fixtures.
 
 The parent conftest.py defines `client` as an async httpx.AsyncClient fixture
@@ -12,9 +26,13 @@ import pytest
 import threading
 import time
 import os
+import socket
 import httpx
+import uvicorn
+from openai import OpenAI, AsyncOpenAI
+from openai_http.app import create_app
+from openai_http.config import Settings
 
-# Use default config.toml port (8000) for SDK tests
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 8000
 TEST_BASE_URL = f"http://{TEST_HOST}:{TEST_PORT}/v1"
@@ -36,11 +54,6 @@ def _wait_for_server(host: str, port: int, timeout: float = 15.0) -> bool:
 
 def _start_server_thread():
     """Start uvicorn server in a daemon thread."""
-    import uvicorn
-    from openai_http.app import create_app
-    from openai_http.config import Settings
-
-    # Ensure mock backend
     os.environ["OPENAI_HTTP__AUTH__ENABLED"] = "false"
     os.environ["OPENAI_HTTP__OBSERVABILITY__LOG_LEVEL"] = "warning"
     os.environ["OPENAI_HTTP__OBSERVABILITY__LOG_FORMAT"] = "text"
@@ -67,14 +80,11 @@ def _start_server_thread():
 @pytest.fixture(scope="session")
 def sdk_server():
     """Start the mock server for SDK tests."""
-    # Check if port is already in use
     try:
-        import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         result = s.connect_ex((TEST_HOST, TEST_PORT))
         s.close()
         if result == 0:
-            # Port already in use - check if it's our server
             if _wait_for_server(TEST_HOST, TEST_PORT, timeout=2.0):
                 yield {
                     "host": TEST_HOST,
@@ -101,14 +111,12 @@ def sdk_server():
         "server": server,
     }
 
-    # Shutdown
     server.should_exit = True
 
 
 @pytest.fixture
 def client(sdk_server):
     """Synchronous OpenAI client for SDK tests."""
-    from openai import OpenAI
     return OpenAI(
         api_key="test-key",
         base_url=sdk_server["base_url"],
@@ -118,7 +126,6 @@ def client(sdk_server):
 @pytest.fixture
 def async_client(sdk_server):
     """Asynchronous OpenAI client for SDK tests."""
-    from openai import AsyncOpenAI
     return AsyncOpenAI(
         api_key="test-key",
         base_url=sdk_server["base_url"],

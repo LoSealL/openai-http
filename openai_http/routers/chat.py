@@ -1,4 +1,18 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 Chat Completions endpoint.
 
 POST /v1/chat/completions - chat completion (streaming + non-streaming)
@@ -27,6 +41,22 @@ async def chat_completions(
     body: ChatCompletionRequest,
     request: Request,
 ):
+    """Create a chat completion.
+
+    Supports both streaming and non-streaming modes, as well as tool calls.
+
+    Args:
+        body: The chat completion request parameters.
+        request: The HTTP request object.
+
+    Returns:
+        JSONResponse or StreamingResponse: The chat completion result.
+
+    Raises:
+        NotFoundError: If the requested model does not exist.
+        InvalidRequestError: If max_tokens is invalid.
+        NotImplementedOpenAIError: If tool calls are requested but not supported.
+    """
     backend = request.app.state.backend
     queue = request.app.state.queue
 
@@ -85,6 +115,13 @@ async def chat_completions(
     if body.stream:
 
         async def stream_generator() -> AsyncGenerator[str, None]:
+            """Generate streaming chat completion chunks.
+
+            Handles tool call deltas and content streaming.
+
+            Yields:
+                str: SSE-formatted chat completion chunks, ending with a [DONE] signal.
+            """
             try:
                 async with queue.acquire():
                     first_chunk = _make_chunk(
@@ -202,6 +239,16 @@ async def chat_completions(
 
 
 def _serialize_message(m) -> dict:
+    """Serialize a chat message to a dictionary.
+
+    Includes tool_calls and tool_call_id if present.
+
+    Args:
+        m: A chat message object with role, content, and optional tool fields.
+
+    Returns:
+        dict: The serialized message dictionary.
+    """
     msg = {"role": m.role, "content": m.content or ""}
     if m.tool_calls:
         msg["tool_calls"] = [tc.model_dump() for tc in m.tool_calls]
@@ -218,6 +265,19 @@ def _make_chunk(
     finish_reason: str | None = None,
     usage: dict | None = None,
 ) -> str:
+    """Build an SSE-formatted chat completion chunk.
+
+    Args:
+        request_id: The unique request identifier.
+        model: The model name.
+        created: Unix timestamp of creation time.
+        delta: The content delta (e.g. {"content": "Hello"}).
+        finish_reason: Optional reason for finishing (e.g. "stop", "tool_calls").
+        usage: Optional usage statistics for the final chunk.
+
+    Returns:
+        str: An SSE data message containing the chunk JSON.
+    """
     chunk = {
         "id": request_id,
         "object": "chat.completion.chunk",

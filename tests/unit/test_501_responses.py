@@ -1,3 +1,21 @@
+"""
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Tests for 501 responses for unimplemented endpoints.
+"""
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -7,6 +25,8 @@ from openai_http.backends.base import BackendBase
 
 
 class _NoEmbedBackend(BackendBase):
+    """A backend that does not implement embeddings."""
+
     async def generate(self, prompt, **kwargs):
         return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
 
@@ -24,6 +44,7 @@ class _NoEmbedBackend(BackendBase):
 
 @pytest.fixture
 async def no_embed_client():
+    """Fixture providing an async test client with NoEmbedBackend."""
     settings = Settings(
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
@@ -40,6 +61,7 @@ async def no_embed_client():
 
 @pytest.mark.asyncio
 async def test_embeddings_returns_501(no_embed_client):
+    """POST /v1/embeddings returns 501 when backend lacks embed()."""
     resp = await no_embed_client.post(
         "/v1/embeddings",
         json={"input": "hello", "model": "m"},
@@ -53,6 +75,7 @@ async def test_embeddings_returns_501(no_embed_client):
 
 @pytest.mark.asyncio
 async def test_chat_still_works_with_no_embed_backend(no_embed_client):
+    """Chat completions still work even when the backend lacks embed()."""
     resp = await no_embed_client.post(
         "/v1/chat/completions",
         json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},

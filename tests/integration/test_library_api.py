@@ -1,3 +1,22 @@
+"""
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Integration tests for the openai_http library API.
+"""
+
+import asyncio
 import threading
 import time
 import socket
@@ -5,16 +24,19 @@ import pytest
 import httpx
 
 from openai_http.backends.base import BackendBase
+from openai_http.backends.mock_backend import MockTransformersBackend
 from openai_http._server import run_server
 
 
 def _free_port() -> int:
+    """Find a free TCP port on localhost."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
 def _wait_for_server(port: int, timeout: float = 10.0) -> bool:
+    """Wait for the server to become available on the given port."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -28,7 +50,10 @@ def _wait_for_server(port: int, timeout: float = 10.0) -> bool:
 
 
 class EchoBackend(BackendBase):
+    """A backend that echoes back the user prompt."""
+
     async def generate(self, prompt, **kwargs):
+        """Echo the prompt back as generated text."""
         text = prompt if isinstance(prompt, str) else prompt[-1]["content"]
         return {
             "generated_text": f"ECHO: {text}",
@@ -36,38 +61,50 @@ class EchoBackend(BackendBase):
         }
 
     async def generate_stream(self, prompt, **kwargs):
+        """Stream the echo response word by word."""
         result = await self.generate(prompt, **kwargs)
         for word in result["generated_text"].split():
             yield word + " "
 
     async def list_models(self):
+        """Return the list of available models."""
         return [{"id": "echo", "object": "model", "created": 0, "owned_by": "test"}]
 
     async def get_model(self, model_id):
+        """Return model info for the given model_id."""
         if model_id == "echo":
             return (await self.list_models())[0]
         return None
 
 
 class ErrorBackend(BackendBase):
+    """A backend whose generate() always raises RuntimeError."""
+
     async def generate(self, prompt, **kwargs):
+        """Raise a RuntimeError to test error handling."""
         raise RuntimeError("boom")
 
     async def generate_stream(self, prompt, **kwargs):
+        """Yield a single token as stream response."""
         yield "ok"
 
     async def list_models(self):
+        """Return the list of available models."""
         return [{"id": "err", "object": "model", "created": 0, "owned_by": "test"}]
 
     async def get_model(self, model_id):
+        """Return model info for the given model_id."""
         return {"id": "err", "object": "model", "created": 0, "owned_by": "test"}
 
 
 class _RunResult:
+    """Container for capturing exceptions from a server thread."""
+
     exception = None
 
 
 def _run_server_thread(backend, port, result):
+    """Run the server in a background thread, capturing any exception."""
     try:
         run_server(
             backend,
@@ -81,6 +118,7 @@ def _run_server_thread(backend, port, result):
 
 
 def _start(backend, port):
+    """Start the server on a background thread and wait for it to become available."""
     result = _RunResult()
     t = threading.Thread(target=_run_server_thread, args=(backend, port, result), daemon=True)
     t.start()
@@ -93,6 +131,7 @@ def _start(backend, port):
 
 
 def _stop(port):
+    """Shut down the server running on the given port."""
     try:
         httpx.post(f"http://127.0.0.1:{port}/shutdown", timeout=1.0)
     except Exception:
@@ -100,6 +139,7 @@ def _stop(port):
 
 
 def test_custom_backend_chat():
+    """A custom backend serves chat completions via the OpenAI-compatible API."""
     port = _free_port()
     _start(EchoBackend(), port)
     try:
@@ -116,6 +156,7 @@ def test_custom_backend_chat():
 
 
 def test_custom_backend_models_list():
+    """A custom backend serves the models list via the OpenAI-compatible API."""
     port = _free_port()
     _start(EchoBackend(), port)
     try:
@@ -128,6 +169,7 @@ def test_custom_backend_models_list():
 
 
 def test_custom_backend_501_embeddings():
+    """Embeddings endpoint returns 501 when the backend does not support it."""
     port = _free_port()
     _start(EchoBackend(), port)
     try:
@@ -144,6 +186,7 @@ def test_custom_backend_501_embeddings():
 
 
 def test_backend_exception_maps_to_500():
+    """A RuntimeError in generate() is caught and returned as a 500 error response."""
     port = _free_port()
     _start(ErrorBackend(), port)
     try:
@@ -162,11 +205,13 @@ def test_backend_exception_maps_to_500():
 
 
 def test_invalid_backend_raises_type_error():
+    """Passing a non-BackendBase to run_server raises TypeError."""
     with pytest.raises(TypeError, match="BackendBase"):
         run_server("not-a-backend")
 
 
 def test_lifecycle_hooks_called():
+    """setup(), generate(), and teardown() lifecycle hooks are invoked in order."""
 
     class TrackingBackend(EchoBackend):
         setup_called = False
@@ -199,6 +244,7 @@ def test_lifecycle_hooks_called():
 
 
 def test_setup_failure_aborts_startup():
+    """If setup() raises, the server startup is aborted."""
 
     class FailingBackend(EchoBackend):
         async def setup(self):
@@ -220,9 +266,7 @@ def test_setup_failure_aborts_startup():
 
 
 def test_mock_backend_lifecycle_noop():
-    import asyncio
-    from openai_http.backends.mock_backend import MockTransformersBackend
-
+    """MockTransformersBackend.setup() and teardown() are no-ops."""
     b = MockTransformersBackend()
 
     async def _run():

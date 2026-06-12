@@ -1,4 +1,18 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 Mock backend for testing and development.
 
 Implements the Backend Protocol using mock data and simple token estimation.
@@ -20,12 +34,33 @@ AVAILABLE_MODELS = [
 
 
 class MockTransformersBackend(BackendBase):
+    """Mock backend that simulates model responses.
+
+    Generates deterministic or random responses without loading any
+    real model weights. Useful for testing and development.
+    """
 
     def __init__(self, model_name: str = "mock-model"):
+        """Initialize the mock backend.
+
+        Args:
+            model_name: The model identifier string.
+        """
         self.model_name = model_name
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
+        """Roughly estimate token count for a text string.
+
+        Uses a simple heuristic: CJK characters count as 1.5 tokens,
+        others as 0.25 tokens.
+
+        Args:
+            text: The input text string.
+
+        Returns:
+            Estimated token count, minimum 1.
+        """
         count: float = 0
         for char in text:
             if "\u4e00" <= char <= "\u9fff":
@@ -36,6 +71,14 @@ class MockTransformersBackend(BackendBase):
 
     @staticmethod
     def _build_prompt(messages: list[dict[str, str]]) -> str:
+        """Build a plain text prompt from a list of message dicts.
+
+        Args:
+            messages: List of message dicts with role and content keys.
+
+        Returns:
+            A formatted prompt string suitable for text generation.
+        """
         prompt_parts = []
         for msg in messages:
             role = msg.get("role", "user")
@@ -54,6 +97,15 @@ class MockTransformersBackend(BackendBase):
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
     ) -> dict:
+        """Generate a mock completion response.
+
+        Args:
+            prompt: A plain text string or a list of message dicts.
+            **kwargs: Generation parameters (max_tokens, temperature, etc.).
+
+        Returns:
+            A dict with generated_text and usage token counts.
+        """
         if isinstance(prompt, list):
             messages = prompt
         else:
@@ -104,6 +156,18 @@ class MockTransformersBackend(BackendBase):
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
+        """Generate a streaming mock completion.
+
+        Yields the full response in small random-sized chunks with
+        simulated delays.
+
+        Args:
+            prompt: A plain text string or a list of message dicts.
+            **kwargs: Generation parameters forwarded to generate().
+
+        Yields:
+            Text chunks as strings.
+        """
         result = await self.generate(prompt, **kwargs)
         full_text = result["generated_text"]
 
@@ -121,6 +185,16 @@ class MockTransformersBackend(BackendBase):
         tools: list[dict[str, Any]],
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        """Generate mock tool/function call responses.
+
+        Args:
+            messages: The conversation history.
+            tools: The tool definitions available to the model.
+            **kwargs: Additional parameters including tool_choice.
+
+        Returns:
+            A list of tool call dicts with mock argument values.
+        """
         if not tools:
             return []
         tool_choice = kwargs.get("tool_choice", "auto")
@@ -161,6 +235,17 @@ class MockTransformersBackend(BackendBase):
         texts: list[str],
         **kwargs: Any,
     ) -> list[list[float]]:
+        """Generate mock embeddings for the given texts.
+
+        Creates deterministic random vectors based on text hash.
+
+        Args:
+            texts: List of text strings to embed.
+            **kwargs: Additional parameters including dimensions.
+
+        Returns:
+            A list of float vectors, one per input text.
+        """
         dims = kwargs.get("dimensions", 1536)
         embeddings = []
         for text in texts:
@@ -171,9 +256,22 @@ class MockTransformersBackend(BackendBase):
         return embeddings
 
     async def list_models(self) -> list[dict]:
+        """List all available mock models.
+
+        Returns:
+            A list of model dicts defined in AVAILABLE_MODELS.
+        """
         return AVAILABLE_MODELS
 
     async def get_model(self, model_id: str) -> Optional[dict]:
+        """Get details for a specific mock model.
+
+        Args:
+            model_id: The model identifier string.
+
+        Returns:
+            A model dict if found, or None.
+        """
         for model in AVAILABLE_MODELS:
             if model["id"] == model_id:
                 return model

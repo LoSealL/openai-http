@@ -1,4 +1,18 @@
 """
+Copyright (C) 2026 The OPENAI-HTTP Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 Text Completions (legacy) endpoint.
 
 POST /v1/completions - text completion (streaming + non-streaming)
@@ -25,6 +39,21 @@ async def create_completion(
     body: CompletionRequest,
     request: Request,
 ):
+    """Create a text completion (legacy endpoint).
+
+    Supports both streaming and non-streaming modes.
+
+    Args:
+        body: The completion request parameters.
+        request: The HTTP request object.
+
+    Returns:
+        JSONResponse or StreamingResponse: The completion result.
+
+    Raises:
+        NotFoundError: If the requested model does not exist.
+        InvalidRequestError: If max_tokens is invalid.
+    """
     backend = request.app.state.backend
     queue = request.app.state.queue
 
@@ -55,6 +84,11 @@ async def create_completion(
     if body.stream:
 
         async def stream_generator() -> AsyncGenerator[str, None]:
+            """Generate streaming completion chunks.
+
+            Yields:
+                str: SSE-formatted completion chunks, ending with a [DONE] signal.
+            """
             try:
                 async with queue.acquire():
                     for idx in range(n):
@@ -138,6 +172,16 @@ async def create_completion(
 
 
 def _normalize_prompt(prompt) -> str:
+    """Normalize a prompt into a single string.
+
+    Handles string, list-of-strings, and list-of-token-array formats.
+
+    Args:
+        prompt: The raw prompt input.
+
+    Returns:
+        str: The normalized prompt string.
+    """
     if isinstance(prompt, str):
         return prompt
     if isinstance(prompt, list):
@@ -159,6 +203,19 @@ def _make_chunk(
     text: str,
     finish_reason: str | None = None,
 ) -> str:
+    """Build an SSE-formatted completion chunk.
+
+    Args:
+        request_id: The unique request identifier.
+        model: The model name.
+        created: Unix timestamp of creation time.
+        index: The choice index.
+        text: The generated text for this chunk.
+        finish_reason: Optional reason for finishing (e.g. "stop").
+
+    Returns:
+        str: An SSE data message containing the chunk JSON.
+    """
     chunk = {
         "id": request_id,
         "object": "text_completion",
