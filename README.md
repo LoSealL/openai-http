@@ -11,7 +11,7 @@ OpenAI v1 API compatible HTTP service with pluggable inference backends. Built w
 - ✅ Structured JSON logging with request IDs
 - ✅ OpenTelemetry metrics (Prometheus endpoint)
 - ✅ Mock backend for testing (1536-dim embeddings, streaming chat, tool calls)
-- ✅ Transformers backend example (`examples/transformers-backend/` — uses Qwen2.5-0.5B)
+- ✅ Transformers backend example (`examples/transformers-backend/` — uses Qwen3.5-0.8B)
 - ✅ Custom backend SDK (`BackendBase` ABC, `run_server()` entry point)
 - 🚧 Audio (speech, transcriptions, translations) endpoints
 - 🚧 Image generation / editing endpoints
@@ -77,8 +77,15 @@ curl http://localhost:8000/health
 # Install heavy deps (not included in default install)
 uv pip install torch transformers accelerate
 
-# Start with Qwen2.5-0.5B-Instruct (downloads ~1 GB on first run)
+# Start with Qwen3.5-0.8B (downloads ~1.6 GB on first run)
 uv run python examples/transformers-backend/transformers_backend.py
+
+# Customize model, temperature, or enable thinking mode
+uv run python examples/transformers-backend/transformers_backend.py \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --temperature 0.7 \
+  --thinking \
+  --port 8000
 ```
 
 See [`examples/transformers-backend/README.md`](examples/transformers-backend/README.md) for details.

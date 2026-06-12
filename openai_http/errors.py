@@ -316,15 +316,8 @@ def register_error_handlers(app) -> None:
     app.add_exception_handler(Exception, generic_error_handler)
 
     async def not_found_handler(request: Request, exc: HTTPException) -> JSONResponse:
-        """Handle 404 Not Found responses.
-
-        Args:
-            request: The incoming HTTP request.
-            exc: The raised HTTPException.
-
-        Returns:
-            A JSONResponse with HTTP 404 and an OpenAI-format error body.
-        """
+        if isinstance(exc, OpenAIError):
+            return await openai_error_handler(request, exc)
         return JSONResponse(
             status_code=404,
             content=_error_json(

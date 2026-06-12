@@ -4,7 +4,7 @@ A working `openai_http` backend powered by HuggingFace Transformers.
 Loads a causal language model and serves chat completions with proper
 chat template handling, streaming, and real token usage counts.
 
-Default model: **Qwen/Qwen2.5-0.5B-Instruct** (~1 GB download).
+Default model: **Qwen/Qwen3.5-0.8B** (~1.6 GB download).
 
 ## Install
 
@@ -27,7 +27,19 @@ uv pip install transformers accelerate
 From the repo root:
 
 ```bash
+# Default: Qwen3.5-0.8B, greedy sampling, no thinking
 uv run python examples/transformers-backend/transformers_backend.py
+
+# Custom model, temperature, and thinking mode
+uv run python examples/transformers-backend/transformers_backend.py \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --temperature 0.7 \
+  --thinking \
+  --max-tokens 2048 \
+  --port 8000
+
+# See all options
+uv run python examples/transformers-backend/transformers_backend.py --help
 ```
 
 The server listens on `http://0.0.0.0:8000`. The first request triggers
@@ -126,10 +138,12 @@ for chunk in stream:
 - Uses real token counts from the tokenizer for the `usage` field
   (unlike the mock backend, which estimates by character count).
 - Auto-detects and uses CUDA, then Apple MPS, then CPU.
-- To use a different model, edit `DEFAULT_MODEL` in
+- To use a different model, pass `--model` or edit `DEFAULT_MODEL` in
   `transformers_backend.py`. Note that some models (e.g. Llama 2)
   require `huggingface-cli login` for access.
-- **Tool calling** is implemented via Qwen2.5's built-in tool support
+- **Thinking mode** (`--thinking`) enables reasoning tokens via
+  `<think>` tags (supported by Qwen3.5 and recent models).
+- **Tool calling** is implemented via Qwen's built-in tool support
   (`apply_chat_template` with `tools=` parameter). Pass `tools` and
   `tool_choice` in the chat completion request.
 - **Embeddings** are not implemented — requests return HTTP 501.

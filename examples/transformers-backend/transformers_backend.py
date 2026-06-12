@@ -11,6 +11,7 @@ Dependencies:
     uv pip install torch transformers accelerate
 """
 
+import argparse
 import asyncio
 import json
 import re
@@ -30,12 +31,15 @@ import openai_http
 from openai_http.backends.base import BackendBase
 
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen3.5-0.8B"
 
 
 class TransformersBackend(BackendBase):
-    def __init__(self, model_id: str = DEFAULT_MODEL):
+    def __init__(self, model_id: str = DEFAULT_MODEL, temperature: float = 0.0, thinking: bool = False, max_tokens: int = 1024):
         self.model_id = model_id
+        self.temperature = temperature
+        self.thinking = thinking
+        self.max_tokens = max_tokens
         self.tokenizer = None
         self.model = None
         self.device = None
@@ -88,6 +92,7 @@ class TransformersBackend(BackendBase):
             messages,
             tokenize=False,
             add_generation_prompt=True,
+            enable_thinking=self.thinking,
         )
         inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
         prompt_len = inputs["input_ids"].shape[1]
@@ -103,8 +108,8 @@ class TransformersBackend(BackendBase):
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
     ) -> dict:
-        max_new_tokens = int(kwargs.get("max_tokens", 256))
-        temperature = float(kwargs.get("temperature", 0.7))
+        max_new_tokens = int(kwargs.get("max_tokens", self.max_tokens))
+        temperature = float(kwargs.get("temperature", self.temperature))
 
         def _sync_generate():
             inputs, prompt_len, _ = self._prepare_inputs(prompt, max_new_tokens)
@@ -139,8 +144,8 @@ class TransformersBackend(BackendBase):
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
-        max_new_tokens = int(kwargs.get("max_tokens", 256))
-        temperature = float(kwargs.get("temperature", 0.7))
+        max_new_tokens = int(kwargs.get("max_tokens", self.max_tokens))
+        temperature = float(kwargs.get("temperature", self.temperature))
 
         inputs, _, _ = self._prepare_inputs(prompt, max_new_tokens)
         streamer = TextIteratorStreamer(
@@ -206,15 +211,18 @@ class TransformersBackend(BackendBase):
                 tool_choice=tc_for_template if tc_for_template != "auto" else None,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=self.thinking,
             )
             inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
 
             gen_kwargs = {
                 **inputs,
                 "max_new_tokens": 512,
-                "do_sample": False,
+                "do_sample": self.temperature > 0,
                 "pad_token_id": self.tokenizer.pad_token_id,
             }
+            if self.temperature > 0:
+                gen_kwargs["temperature"] = self.temperature
             with torch.no_grad():
                 output_ids = self.model.generate(**gen_kwargs)
 
@@ -277,5 +285,48 @@ class TransformersBackend(BackendBase):
 
 
 if __name__ == "__main__":
-    backend = TransformersBackend(model_id=DEFAULT_MODEL)
-    openai_http.run_server(backend=backend, port=8000)
+    parser = argparse.ArgumentParser(
+        description="Serve a HuggingFace Transformers model via the OpenAI-compatible API."
+    )
+    parser.add_argument(
+        "--model", "-m",
+        default=DEFAULT_MODEL,
+        help=f"HuggingFace model ID (default: {DEFAULT_MODEL})",
+    )
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Server bind address (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port", "-p",
+        type=int,
+        default=8000,
+        help="Server port (default: 8000)",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="Sampling temperature (default: 0.0 for greedy)",
+    )
+    parser.add_argument(
+        "--thinking",
+        action="store_true",
+        help="Enable reasoning tokens via <think> tags (default: off)",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=1024,
+        help="Maximum new tokens per response (default: 1024)",
+    )
+    args = parser.parse_args()
+
+    backend = TransformersBackend(
+        model_id=args.model,
+        temperature=args.temperature,
+        thinking=args.thinking,
+        max_tokens=args.max_tokens,
+    )
+    openai_http.run_server(backend=backend, host=args.host, port=args.port)
