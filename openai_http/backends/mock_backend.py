@@ -233,7 +233,7 @@ class MockTransformersBackend(BackendBase):
             full_text = generated_text
 
         completion_tokens = self._estimate_tokens(full_text)
-        finish_reason = "stop"
+        finish_reason: str = "stop"
         if completion_tokens > max_tokens:
             finish_reason = "length"
 
@@ -253,14 +253,24 @@ class MockTransformersBackend(BackendBase):
             else:
                 generated_text = full_text
 
+        # Re-estimate completion tokens against the actual emitted text
+        # so the usage block matches what the client receives.
+        emitted = (reasoning_content or "") + (generated_text or "")
+        if emitted:
+            completion_tokens = min(
+                self._estimate_tokens(emitted), max_tokens
+            )
+        else:
+            completion_tokens = 0
+
         return {
             "generated_text": generated_text,
             "reasoning_content": reasoning_content,
             "finish_reason": finish_reason,
             "usage": {
                 "prompt_tokens": prompt_tokens,
-                "completion_tokens": min(completion_tokens, max_tokens),
-                "total_tokens": prompt_tokens + min(completion_tokens, max_tokens),
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
             },
         }
 

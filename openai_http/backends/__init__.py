@@ -15,5 +15,29 @@ limitations under the License.
 """
 
 from openai_http.backends.base import BackendBase
+from openai_http.backends.types import (
+    BackendToolCall,
+    BackendToolCallFunction,
+    ContentChunk,
+    FinishChunk,
+    FinishReason,
+    GenerationResult,
+    GenerationUsage,
+    ModelInfo,
+    ReasoningChunk,
+    StreamChunk,
+)
 
-__all__ = ["BackendBase"]
+__all__ = [
+    "BackendBase",
+    "BackendToolCall",
+    "BackendToolCallFunction",
+    "ContentChunk",
+    "FinishChunk",
+    "FinishReason",
+    "GenerationResult",
+    "GenerationUsage",
+    "ModelInfo",
+    "ReasoningChunk",
+    "StreamChunk",
+]

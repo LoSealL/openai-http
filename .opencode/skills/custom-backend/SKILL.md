@@ -43,13 +43,15 @@ Called for **non-streaming** chat completions (`POST /v1/chat/completions` with 
 | `prompt` | `str \| list[dict[str, str]]` | If `str`: raw prompt text. If `list`: messages array — `[{"role": "user", "content": "..."}, ...]` |
 | `**kwargs` | `Any` | Extra params the client passes: `max_tokens`, `temperature`, `top_p`, `tools` (when the server handles tool calls inline) |
 
-**Return** a dict with these keys:
+**Return** a dict (or `GenerationResult` instance from `openai_http.backends.types`) with these keys:
 
 ```python
 {
-    "generated_text": str | None,     # The model's response text
-    "tool_calls": list[dict] | None,  # Tool call results if applicable
-    "usage": {                        # Token accounting
+    "generated_text": str | None,        # The model's response text
+    "reasoning_content": str | None,     # Optional <think> reasoning text
+    "tool_calls": list[dict] | None,     # Backend-emitted tool calls (BackendToolCall shape)
+    "finish_reason": "stop" | "length" | "tool_calls" | "content_filter",
+    "usage": {                           # Token accounting
         "prompt_tokens": int,
         "completion_tokens": int,
         "total_tokens": int,
@@ -57,21 +59,34 @@ Called for **non-streaming** chat completions (`POST /v1/chat/completions` with 
 }
 ```
 
-#### `async def generate_stream(prompt, **kwargs) -> AsyncGenerator[str, None]`
+> **Contract validation**: every router validates this dict against
+> `openai_http.backends.types.GenerationResult`. Returning extra keys,
+> the wrong `finish_reason`, or a missing `usage` block produces an
+> HTTP 500 with `error.code == "backend_contract_error"`. Pydantic
+> instances from `openai_http.backends.types` are also accepted.
 
-Called for **streaming** chat completions (`stream: true`). Yield text tokens one chunk at a time.
+#### `async def generate_stream(prompt, **kwargs) -> AsyncGenerator[str | dict, None]`
 
-Same parameters as `generate()`. Yield successive `str` tokens — the server wraps them in SSE format.
+Called for **streaming** chat completions (`stream: true`). Yield either plain `str` tokens (treated as content) or typed dicts. Each dict is validated against `openai_http.backends.types.StreamChunk` at the router boundary.
+
+| Yielded value | Type field | Meaning |
+|---|---|---|
+| `"...text..."` | n/a | Content fragment (legacy form, equivalent to `{"type": "content", ...}`) |
+| `{"type": "content", "content": "..."}` | `content` | Answer chunk |
+| `{"type": "reasoning", "content": "..."}` | `reasoning` | `<think>` reasoning chunk |
+| `{"type": "finish", "reason": "stop" \| "length" \| "tool_calls" \| "content_filter"}` | `finish` | Terminal marker |
 
 ```python
 async for token in backend.generate_stream(messages, **kwargs):
-    # token is a str, e.g. "Hello", " world", "."
-    yield token
+    yield token  # str OR one of the typed dicts above
 ```
+
+Anything else — including a chunk with an unknown `type` value or a
+non-string `content` field — produces an HTTP 500 mid-stream.
 
 #### `async def list_models() -> list[dict]`
 
-Called for `GET /v1/models`. Return a list of model objects:
+Called for `GET /v1/models`. Return a list of model objects — each entry is validated against `openai_http.backends.types.ModelInfo`:
 
 ```python
 [
@@ -83,6 +98,8 @@ Called for `GET /v1/models`. Return a list of model objects:
     },
 ]
 ```
+
+A missing field (`id`, `created`, or `owned_by`) raises HTTP 500 `backend_contract_error`.
 
 #### `async def get_model(model_id: str) -> Optional[dict]`
 

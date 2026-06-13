@@ -58,12 +58,22 @@ class BackendBase(abc.ABC):
                 top_p (float): Nucleus sampling probability
 
         Returns:
-            dict with exactly these keys:
-                generated_text (str): The generated completion text
+            A mapping that conforms to
+            ``openai_http.backends.types.GenerationResult``:
+
+                generated_text (str | None): The completion text
+                reasoning_content (str | None): Optional thinking text
+                tool_calls (list | None): Backend tool calls
+                finish_reason (Literal["stop","length","tool_calls",
+                                       "content_filter"]): Why generation ended
                 usage (dict): Token usage stats with keys:
                     prompt_tokens (int)
                     completion_tokens (int)
                     total_tokens (int)
+
+            Returning a ``GenerationResult`` instance directly is also
+            supported. Mismatched output causes HTTP 500 with
+            ``error.code == "backend_contract_error"``.
 
         Raises:
             Any exception — will be caught by the server and mapped
@@ -76,7 +86,7 @@ class BackendBase(abc.ABC):
         self,
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | dict, None]:
         """
         Stream text completion token by token.
 
@@ -85,7 +95,12 @@ class BackendBase(abc.ABC):
             **kwargs: Same as generate().
 
         Yields:
-            str: Individual text chunks to be streamed via SSE.
+            Either a plain ``str`` (treated as content) or a typed dict
+            matching ``openai_http.backends.types.StreamChunk``:
+
+                {"type": "content", "content": "..."}
+                {"type": "reasoning", "content": "..."}
+                {"type": "finish", "reason": "stop" | "length" | ...}
 
         Raises:
             Any exception — will be caught and mapped to error.

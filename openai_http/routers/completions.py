@@ -21,17 +21,49 @@ POST /v1/completions - text completion (streaming + non-streaming)
 import json
 import time
 import uuid
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from openai_http.auth import verify_api_key
-from openai_http.schemas.completions import CompletionRequest
-from openai_http.errors import NotFoundError, InvalidRequestError
-
+from openai_http.backends.contract import (
+    validate_generation,
+    validate_stream_chunk,
+)
+from openai_http.backends.types import ContentChunk, FinishChunk, ReasoningChunk
+from openai_http.errors import InvalidRequestError, NotFoundError
+from openai_http.schemas.common import UsageInfo
+from openai_http.schemas.completions import (
+    CompletionChunk,
+    CompletionChunkChoice,
+    CompletionRequest,
+    CompletionResponse,
+    TextChoice,
+)
 
 router = APIRouter(tags=["Completions"], dependencies=[Depends(verify_api_key)])
+
+
+# Legacy completions only allow "stop"/"length" as finish reason.
+_LegacyFinish = Literal["stop", "length"]
+
+
+def _coerce_legacy_finish(reason: str) -> _LegacyFinish:
+    """Coerce a backend finish reason into the legacy completion subset.
+
+    Tool calls / content filters do not exist on the legacy endpoint;
+    fall back to ``"stop"`` rather than producing an invalid response.
+
+    Args:
+        reason: The backend finish reason.
+
+    Returns:
+        Either ``"stop"`` or ``"length"``.
+    """
+    if reason == "length":
+        return "length"
+    return "stop"
 
 
 @router.post("/v1/completions", response_model=None)
@@ -92,42 +124,52 @@ async def create_completion(
             try:
                 async with queue.acquire():
                     for idx in range(n):
-                        first_chunk = _make_chunk(
+                        yield _make_chunk(
                             request_id, body.model, created, idx, text="",
                         )
-                        yield first_chunk
 
-                        stream_finish_reason = "stop"
-                        async for token in backend.generate_stream(prompt_str, **kwargs):
-                            if isinstance(token, dict):
-                                if token.get("type") == "finish":
-                                    stream_finish_reason = token.get("reason", "stop")
-                                    continue
-                                chunk_text = token.get("content", "")
+                        stream_finish_reason: _LegacyFinish = "stop"
+                        async for token in backend.generate_stream(
+                            prompt_str, **kwargs
+                        ):
+                            chunk = validate_stream_chunk(token)
+                            if isinstance(chunk, FinishChunk):
+                                stream_finish_reason = _coerce_legacy_finish(
+                                    chunk.reason
+                                )
+                                continue
+                            if isinstance(chunk, ReasoningChunk):
+                                # Legacy completions have no reasoning slot;
+                                # drop reasoning text from the stream.
+                                continue
+                            if isinstance(chunk, ContentChunk):
+                                chunk_text = chunk.content
                             else:
-                                chunk_text = token
-                            chunk = _make_chunk(
-                                request_id, body.model, created, idx, text=chunk_text,
+                                chunk_text = chunk
+                            yield _make_chunk(
+                                request_id, body.model, created, idx,
+                                text=chunk_text,
                             )
-                            yield chunk
 
-                        final = _make_chunk(
+                        yield _make_chunk(
                             request_id, body.model, created, idx,
-                            text="", finish_reason=stream_finish_reason,
+                            text="",
+                            finish_reason=stream_finish_reason,
                         )
-                        yield final
 
                     yield "data: [DONE]\n\n"
 
             except Exception as e:
-                error_msg = json.dumps({
-                    "error": {
-                        "message": str(e),
-                        "type": "server_error",
-                        "param": None,
-                        "code": "generation_error",
+                error_msg = json.dumps(
+                    {
+                        "error": {
+                            "message": str(e),
+                            "type": "server_error",
+                            "param": None,
+                            "code": "generation_error",
+                        }
                     }
-                })
+                )
                 yield f"data: {error_msg}\n\n"
                 yield "data: [DONE]\n\n"
 
@@ -142,41 +184,42 @@ async def create_completion(
         )
 
     async with queue.acquire():
-        choices = []
+        choices: list[TextChoice] = []
         total_prompt_tokens = 0
         total_completion_tokens = 0
 
         for idx in range(n):
-            result = await backend.generate(prompt_str, **kwargs)
-            generated = result["generated_text"]
+            raw_result = await backend.generate(prompt_str, **kwargs)
+            result = validate_generation(raw_result)
+            generated = result.generated_text or ""
 
             if body.echo:
                 generated = prompt_str + generated
 
-            choices.append({
-                "text": generated,
-                "index": idx,
-                "logprobs": None,
-                "finish_reason": result.get("finish_reason", "stop"),
-            })
-            total_prompt_tokens += result["usage"]["prompt_tokens"]
-            total_completion_tokens += result["usage"]["completion_tokens"]
+            choices.append(
+                TextChoice(
+                    text=generated,
+                    index=idx,
+                    finish_reason=_coerce_legacy_finish(result.finish_reason),
+                )
+            )
+            total_prompt_tokens += result.usage.prompt_tokens
+            total_completion_tokens += result.usage.completion_tokens
 
-    response = {
-        "id": request_id,
-        "object": "text_completion",
-        "created": created,
-        "model": body.model,
-        "choices": choices,
-        "usage": {
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "total_tokens": total_prompt_tokens + total_completion_tokens,
-        },
-        "system_fingerprint": "fp_default",
-    }
+    response = CompletionResponse(
+        id=request_id,
+        created=created,
+        model=body.model,
+        choices=choices,
+        usage=UsageInfo(
+            prompt_tokens=total_prompt_tokens,
+            completion_tokens=total_completion_tokens,
+            total_tokens=total_prompt_tokens + total_completion_tokens,
+        ),
+        system_fingerprint="fp_default",
+    )
 
-    return JSONResponse(content=response)
+    return JSONResponse(content=response.model_dump(exclude_none=True))
 
 
 def _normalize_prompt(prompt) -> str:
@@ -209,7 +252,7 @@ def _make_chunk(
     created: int,
     index: int,
     text: str,
-    finish_reason: str | None = None,
+    finish_reason: _LegacyFinish | None = None,
 ) -> str:
     """Build an SSE-formatted completion chunk.
 
@@ -224,18 +267,16 @@ def _make_chunk(
     Returns:
         str: An SSE data message containing the chunk JSON.
     """
-    chunk = {
-        "id": request_id,
-        "object": "text_completion",
-        "created": created,
-        "model": model,
-        "choices": [
-            {
-                "text": text,
-                "index": index,
-                "logprobs": None,
-                "finish_reason": finish_reason,
-            }
+    chunk = CompletionChunk(
+        id=request_id,
+        created=created,
+        model=model,
+        choices=[
+            CompletionChunkChoice(
+                text=text,
+                index=index,
+                finish_reason=finish_reason,
+            )
         ],
-    }
-    return f"data: {json.dumps(chunk)}\n\n"
+    )
+    return f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"

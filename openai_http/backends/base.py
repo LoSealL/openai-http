@@ -17,6 +17,12 @@ Backend abstraction layer.
 
 Defines the BackendBase abstract class that all inference backends
 must implement to integrate with the openai_http server.
+
+The router boundary validates each backend return value against the
+typed contracts in :mod:`openai_http.backends.types`. Backends may
+return either a plain ``dict`` matching the documented shape or the
+corresponding Pydantic model instance. Mismatched output produces an
+HTTP 500 ``server_error`` with code ``backend_contract_error``.
 """
 
 import abc
@@ -46,13 +52,25 @@ class BackendBase(abc.ABC):
                 max_tokens, etc.).
 
         Returns:
-            A dict with at minimum a "generated_text" key and
-            optionally a "usage" key with token counts.
-            If the model produces reasoning/thinking content (e.g.
-            <think> tags), include a "reasoning_content" key with
-            that text separated from "generated_text".
-            Optionally include a "finish_reason" key: "stop" (natural
-            EOS, default if absent) or "length" (hit max_tokens).
+            A mapping that conforms to
+            :class:`openai_http.backends.types.GenerationResult`.
+            Required keys::
+
+                {
+                    "generated_text": Optional[str],
+                    "reasoning_content": Optional[str],
+                    "tool_calls": Optional[list[BackendToolCall-shaped]],
+                    "finish_reason": "stop" | "length" | "tool_calls"
+                                     | "content_filter",
+                    "usage": {
+                        "prompt_tokens": int,
+                        "completion_tokens": int,
+                        "total_tokens": int,
+                    },
+                }
+
+            Returning a ``GenerationResult`` instance directly is also
+            supported.
         """
 
     @abc.abstractmethod
@@ -63,14 +81,21 @@ class BackendBase(abc.ABC):
     ) -> AsyncGenerator[str | dict[str, Any], None]:
         """Generate a streaming completion.
 
-        Yields text chunks as they become available.
+        Yields chunks as they become available.
 
         Each yielded item is either:
-        - A plain str: treated as content (backward compatible).
-        - A dict with "type" and "content" keys:
-            {"type": "reasoning", "content": "..."}  — thinking chunk
-            {"type": "content",  "content": "..."}   — answer chunk
-            {"type": "finish",   "reason": "length"} — hit max_tokens
+
+        * A plain ``str``: treated as a content chunk (backward
+          compatible with simple backends).
+        * A typed dict matching one of the
+          :data:`openai_http.backends.types.StreamChunk` variants::
+
+              {"type": "reasoning", "content": "..."}
+              {"type": "content",   "content": "..."}
+              {"type": "finish",    "reason": "stop" | "length" | ...}
+
+        * One of the corresponding Pydantic instances
+          (``ReasoningChunk``, ``ContentChunk``, ``FinishChunk``).
 
         Args:
             prompt: A plain text string or a list of message dicts.
@@ -87,8 +112,10 @@ class BackendBase(abc.ABC):
         """List all available models.
 
         Returns:
-            A list of model dicts with id, object, created,
-            and owned_by keys.
+            A list of mappings each conforming to
+            :class:`openai_http.backends.types.ModelInfo`. Required
+            keys per entry: ``id``, ``object``, ``created``,
+            ``owned_by``.
         """
 
     @abc.abstractmethod
@@ -99,7 +126,9 @@ class BackendBase(abc.ABC):
             model_id: The model identifier string.
 
         Returns:
-            A model dict if found, or None.
+            A mapping conforming to
+            :class:`openai_http.backends.types.ModelInfo` if found, or
+            ``None``.
         """
 
     async def embed(
@@ -135,7 +164,11 @@ class BackendBase(abc.ABC):
             **kwargs: Additional parameters including tool_choice.
 
         Returns:
-            A list of tool call dicts with id, type, and function keys.
+            A list of mappings conforming to
+            :class:`openai_http.backends.types.BackendToolCall`. Each
+            entry must include ``id``, ``type="function"``, and a
+            ``function`` mapping with ``name`` and a JSON-encoded
+            ``arguments`` string.
 
         Raises:
             NotImplementedError: If tool calls are not supported.

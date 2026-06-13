@@ -23,18 +23,24 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from openai_http.auth import verify_api_key
+from openai_http.errors import (
+    InvalidRequestError,
+    NotFoundError,
+    NotImplementedOpenAIError,
+)
+from openai_http.schemas.common import UsageInfo
 from openai_http.schemas.embeddings import (
-    EmbeddingRequest,
     EmbeddingObject,
+    EmbeddingRequest,
+    EmbeddingResponse,
     floats_to_base64,
 )
-from openai_http.errors import NotFoundError, InvalidRequestError, NotImplementedOpenAIError
 
 
 router = APIRouter(tags=["Embeddings"], dependencies=[Depends(verify_api_key)])
 
 
-@router.post("/v1/embeddings")
+@router.post("/v1/embeddings", response_model=None)
 async def create_embeddings(
     body: EmbeddingRequest,
     request: Request,
@@ -87,26 +93,23 @@ async def create_embeddings(
     except NotImplementedError:
         raise NotImplementedOpenAIError("Embeddings are not supported by this backend")
 
-    data = []
+    data: list[EmbeddingObject] = []
     for i, vec in enumerate(embeddings):
         if body.encoding_format == "base64":
             data.append(EmbeddingObject(index=i, embedding=floats_to_base64(vec)))
         else:
             data.append(EmbeddingObject(index=i, embedding=vec))
 
-    total_tokens = sum(
-        max(1, int(len(t) * 0.25)) for t in texts
+    total_tokens = sum(max(1, int(len(t) * 0.25)) for t in texts)
+
+    response = EmbeddingResponse(
+        data=data,
+        model=body.model,
+        usage=UsageInfo(
+            prompt_tokens=total_tokens,
+            completion_tokens=0,
+            total_tokens=total_tokens,
+        ),
     )
 
-    response = {
-        "object": "list",
-        "data": [d.model_dump() for d in data],
-        "model": body.model,
-        "usage": {
-            "prompt_tokens": total_tokens,
-            "completion_tokens": 0,
-            "total_tokens": total_tokens,
-        },
-    }
-
-    return JSONResponse(content=response)
+    return JSONResponse(content=response.model_dump(exclude_none=True))
