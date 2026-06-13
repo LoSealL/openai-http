@@ -226,7 +226,7 @@ class TransformersBackend(BackendBase):
 
         loop.run_in_executor(None, _producer)
 
-        state = "thinking"
+        state = "thinking" if self.thinking else "answering"
         buf = ""
         end_think_tag = "</think>"
         token_count = 0

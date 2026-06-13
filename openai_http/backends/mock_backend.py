@@ -97,7 +97,8 @@ class MockTransformersBackend(BackendBase):
             return v
         if isinstance(v, dict):
             return {
-                k: MockTransformersBackend._summarize_value(v) for k, v in v.items()
+                k: MockTransformersBackend._summarize_value(item)
+                for k, item in v.items()
             }
         if isinstance(v, list):
             return [MockTransformersBackend._summarize_value(item) for item in v]
