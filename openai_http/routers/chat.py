@@ -150,10 +150,23 @@ async def chat_completions(
                         )
                         yield chunk
                     else:
+                        stream_finish_reason = "stop"
                         async for token in backend.generate_stream(messages, **kwargs):
+                            if isinstance(token, dict):
+                                chunk_type = token.get("type", "content")
+                                if chunk_type == "finish":
+                                    stream_finish_reason = token.get("reason", "stop")
+                                    continue
+                                chunk_text = token.get("content", "")
+                                if chunk_type == "reasoning":
+                                    delta = {"reasoning_content": chunk_text}
+                                else:
+                                    delta = {"content": chunk_text}
+                            else:
+                                delta = {"content": token}
                             chunk = _make_chunk(
                                 request_id, body.model, created,
-                                delta={"content": token},
+                                delta=delta,
                             )
                             yield chunk
 
@@ -163,7 +176,7 @@ async def chat_completions(
                         final = _make_chunk(
                             request_id, body.model, created,
                             delta={},
-                            finish_reason="stop",
+                            finish_reason=stream_finish_reason,
                             usage=final_usage,
                         )
                         yield final
@@ -215,6 +228,8 @@ async def chat_completions(
             result = await backend.generate(messages, **kwargs)
 
     message = {"role": "assistant", "content": result.get("generated_text")}
+    if result.get("reasoning_content"):
+        message["reasoning_content"] = result["reasoning_content"]
     if result.get("tool_calls"):
         message["tool_calls"] = result["tool_calls"]
 
@@ -228,7 +243,7 @@ async def chat_completions(
                 "index": 0,
                 "message": message,
                 "logprobs": None,
-                "finish_reason": tool_finish_reason or "stop",
+                "finish_reason": tool_finish_reason or result.get("finish_reason", "stop"),
             }
         ],
         "usage": result["usage"],

@@ -252,3 +252,118 @@ class TestChatCompletionsStreaming(OpenAITestBase):
         chunks = list(stream)
         assert len(chunks) > 0
         assert chunks[0].object == 'chat.completion.chunk'
+
+
+class TestChatCompletionsReasoning(OpenAITestBase):
+    """Test suite for reasoning_content in chat completions."""
+
+    def test_chat_completion_reasoning_non_streaming(self, client):
+        """Test that non-streaming responses include reasoning_content."""
+        response = client.chat.completions.create(
+            model=MOCK_MODELS[0],
+            messages=simple_chat_messages(),
+            stream=False,
+        )
+
+        assert response.object == 'chat.completion'
+        assert len(response.choices) > 0
+
+        choice = response.choices[0]
+        assert choice.message.content is not None
+        assert isinstance(choice.message.content, str)
+        assert len(choice.message.content) > 0
+
+        assert hasattr(choice.message, 'reasoning_content')
+        reasoning = choice.message.reasoning_content
+        assert reasoning is not None
+        assert isinstance(reasoning, str)
+        assert len(reasoning) > 0
+
+    def test_chat_completion_reasoning_streaming(self, client):
+        """Test that streaming responses include reasoning_content in deltas."""
+        stream = client.chat.completions.create(
+            model=MOCK_MODELS[0],
+            messages=simple_chat_messages(),
+            stream=True,
+        )
+
+        reasoning_chunks = []
+        content_chunks = []
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                reasoning_chunks.append(delta.reasoning_content)
+            if delta.content:
+                content_chunks.append(delta.content)
+
+        assert len(reasoning_chunks) > 0, "Should have received reasoning chunks"
+        assert len(content_chunks) > 0, "Should have received content chunks"
+
+        reasoning_text = "".join(reasoning_chunks)
+        content_text = "".join(content_chunks)
+        assert len(reasoning_text) > 0
+        assert len(content_text) > 0
+
+
+class TestChatCompletionsFinishReason(OpenAITestBase):
+    """Test suite for finish_reason in chat completions."""
+
+    def test_finish_reason_stop(self, client):
+        """Test that normal completion returns finish_reason='stop'."""
+        response = client.chat.completions.create(
+            model=MOCK_MODELS[0],
+            messages=simple_chat_messages(),
+            stream=False,
+        )
+
+        assert response.object == 'chat.completion'
+        assert len(response.choices) > 0
+        assert response.choices[0].finish_reason == 'stop'
+
+    def test_finish_reason_length(self, client):
+        """Test that hitting max_tokens returns finish_reason='length'."""
+        response = client.chat.completions.create(
+            model=MOCK_MODELS[0],
+            messages=simple_chat_messages(),
+            max_tokens=5,
+            stream=False,
+        )
+
+        assert response.object == 'chat.completion'
+        assert len(response.choices) > 0
+        assert response.choices[0].finish_reason == 'length'
+
+    def test_finish_reason_stop_streaming(self, client):
+        """Test that normal streaming returns finish_reason='stop'."""
+        stream = client.chat.completions.create(
+            model=MOCK_MODELS[0],
+            messages=simple_chat_messages(),
+            stream=True,
+        )
+
+        last_chunk = None
+        for chunk in stream:
+            if chunk.choices:
+                last_chunk = chunk
+
+        assert last_chunk is not None
+        assert last_chunk.choices[0].finish_reason == 'stop'
+
+    def test_finish_reason_length_streaming(self, client):
+        """Test that streaming with max_tokens returns finish_reason='length'."""
+        stream = client.chat.completions.create(
+            model=MOCK_MODELS[0],
+            messages=simple_chat_messages(),
+            max_tokens=5,
+            stream=True,
+        )
+
+        last_chunk = None
+        for chunk in stream:
+            if chunk.choices:
+                last_chunk = chunk
+
+        assert last_chunk is not None
+        assert last_chunk.choices[0].finish_reason == 'length'

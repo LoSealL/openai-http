@@ -103,6 +103,29 @@ class TransformersBackend(BackendBase):
         text = self.tokenizer.decode(new_ids, skip_special_tokens=True)
         return text, len(new_ids)
 
+    @staticmethod
+    def _parse_reasoning(text: str) -> tuple[str | None, str]:
+        """Parse reasoning from generated text.
+
+        The opening <think> tag is part of the chat template prompt, so the
+        generated text only contains the reasoning followed by </think>
+        and the actual answer. We split on </think> only.
+
+        Args:
+            text: Raw generated text (reasoning + </think> + answer).
+
+        Returns:
+            A tuple of (reasoning_content, content). reasoning_content
+            is None if no </think> tag is found.
+        """
+        end_tag = "</think>"
+        idx = text.find(end_tag)
+        if idx == -1:
+            return None, text
+        reasoning = text[:idx]
+        content = text[idx + len(end_tag):].lstrip("\n")
+        return reasoning if reasoning else None, content
+
     async def generate(
         self,
         prompt: str | list[dict[str, str]],
@@ -130,8 +153,16 @@ class TransformersBackend(BackendBase):
         inputs, prompt_len, output_ids = await asyncio.to_thread(_sync_generate)
         generated_text, completion_tokens = self._decode_output(prompt_len, output_ids)
 
+        reasoning_content: str | None = None
+        if self.thinking:
+            reasoning_content, generated_text = self._parse_reasoning(generated_text)
+
+        finish_reason = "length" if completion_tokens >= max_new_tokens else "stop"
+
         return {
             "generated_text": generated_text,
+            "reasoning_content": reasoning_content,
+            "finish_reason": finish_reason,
             "usage": {
                 "prompt_tokens": prompt_len,
                 "completion_tokens": completion_tokens,
@@ -143,7 +174,20 @@ class TransformersBackend(BackendBase):
         self,
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | dict[str, Any], None]:
+        """Generate a streaming completion with reasoning support.
+
+        When thinking is enabled, yields reasoning chunks as typed
+        dicts before content chunks. Otherwise yields content dicts.
+
+        Args:
+            prompt: A plain text string or a list of message dicts.
+            **kwargs: Generation parameters.
+
+        Yields:
+            Typed dicts: {"type": "reasoning", "content": ...} or
+            {"type": "content", "content": ...}.
+        """
         max_new_tokens = int(kwargs.get("max_tokens", self.max_tokens))
         temperature = float(kwargs.get("temperature", self.temperature))
 
@@ -182,11 +226,46 @@ class TransformersBackend(BackendBase):
 
         loop.run_in_executor(None, _producer)
 
+        state = "thinking"
+        buf = ""
+        end_think_tag = "</think>"
+        token_count = 0
+
         while True:
             chunk = await chunk_queue.get()
             if chunk is None:
                 break
-            yield chunk
+            token_count += 1
+            buf += chunk
+
+            while buf:
+                if state == "thinking":
+                    idx = buf.find(end_think_tag)
+                    if idx != -1:
+                        reasoning = buf[:idx]
+                        if reasoning:
+                            yield {"type": "reasoning", "content": reasoning}
+                        buf = buf[idx + len(end_think_tag):]
+                        state = "answering"
+                    else:
+                        safe = len(buf) - (len(end_think_tag) - 1)
+                        if safe > 0:
+                            yield {"type": "reasoning", "content": buf[:safe]}
+                            buf = buf[safe:]
+                        break
+
+                else:
+                    yield {"type": "content", "content": buf}
+                    buf = ""
+
+        if buf:
+            if state == "thinking":
+                yield {"type": "reasoning", "content": buf}
+            else:
+                yield {"type": "content", "content": buf}
+
+        if token_count >= max_new_tokens:
+            yield {"type": "finish", "reason": "length"}
 
     async def generate_tool_calls(
         self,

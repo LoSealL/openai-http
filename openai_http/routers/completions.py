@@ -97,15 +97,23 @@ async def create_completion(
                         )
                         yield first_chunk
 
+                        stream_finish_reason = "stop"
                         async for token in backend.generate_stream(prompt_str, **kwargs):
+                            if isinstance(token, dict):
+                                if token.get("type") == "finish":
+                                    stream_finish_reason = token.get("reason", "stop")
+                                    continue
+                                chunk_text = token.get("content", "")
+                            else:
+                                chunk_text = token
                             chunk = _make_chunk(
-                                request_id, body.model, created, idx, text=token,
+                                request_id, body.model, created, idx, text=chunk_text,
                             )
                             yield chunk
 
                         final = _make_chunk(
                             request_id, body.model, created, idx,
-                            text="", finish_reason="stop",
+                            text="", finish_reason=stream_finish_reason,
                         )
                         yield final
 
@@ -149,7 +157,7 @@ async def create_completion(
                 "text": generated,
                 "index": idx,
                 "logprobs": None,
-                "finish_reason": "stop",
+                "finish_reason": result.get("finish_reason", "stop"),
             })
             total_prompt_tokens += result["usage"]["prompt_tokens"]
             total_completion_tokens += result["usage"]["completion_tokens"]

@@ -150,11 +150,13 @@ class ChoiceMessage(BaseModel):
     Attributes:
         role: The message role, always "assistant".
         content: The response content.
+        reasoning_content: The reasoning/thinking content, if any.
         tool_calls: Tool calls made by the model, if any.
     """
 
     role: Literal["assistant"] = "assistant"
     content: Optional[str] = None
+    reasoning_content: Optional[str] = None
     tool_calls: Optional[list[ToolCall]] = None
 
 
@@ -204,11 +206,13 @@ class DeltaMessage(BaseModel):
     Attributes:
         role: The message role (only "assistant" for deltas).
         content: The content delta.
+        reasoning_content: The reasoning/thinking content delta.
         tool_calls: Tool call deltas, if any.
     """
 
     role: Optional[Literal["assistant"]] = None
     content: Optional[str] = None
+    reasoning_content: Optional[str] = None
     tool_calls: Optional[list[dict[str, Any]]] = None
 
 

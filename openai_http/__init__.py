@@ -20,5 +20,5 @@ from openai_http._logging import setup_logging
 from openai_http._server import run_server
 from openai_http.backends.base import BackendBase
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = ["BackendBase", "__version__", "run_server", "setup_logging"]

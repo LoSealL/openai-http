@@ -48,27 +48,38 @@ class BackendBase(abc.ABC):
         Returns:
             A dict with at minimum a "generated_text" key and
             optionally a "usage" key with token counts.
+            If the model produces reasoning/thinking content (e.g.
+            <think> tags), include a "reasoning_content" key with
+            that text separated from "generated_text".
+            Optionally include a "finish_reason" key: "stop" (natural
+            EOS, default if absent) or "length" (hit max_tokens).
         """
-        ...
 
     @abc.abstractmethod
     async def generate_stream(
         self,
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | dict[str, Any], None]:
         """Generate a streaming completion.
 
         Yields text chunks as they become available.
+
+        Each yielded item is either:
+        - A plain str: treated as content (backward compatible).
+        - A dict with "type" and "content" keys:
+            {"type": "reasoning", "content": "..."}  — thinking chunk
+            {"type": "content",  "content": "..."}   — answer chunk
+            {"type": "finish",   "reason": "length"} — hit max_tokens
 
         Args:
             prompt: A plain text string or a list of message dicts.
             **kwargs: Additional generation parameters.
 
         Yields:
-            Text chunks as strings.
+            Text chunks or typed dicts.
         """
-        ...
+
         yield ""
 
     @abc.abstractmethod
@@ -79,7 +90,6 @@ class BackendBase(abc.ABC):
             A list of model dicts with id, object, created,
             and owned_by keys.
         """
-        ...
 
     @abc.abstractmethod
     async def get_model(self, model_id: str) -> Optional[dict]:
@@ -91,7 +101,6 @@ class BackendBase(abc.ABC):
         Returns:
             A model dict if found, or None.
         """
-        ...
 
     async def embed(
         self,
@@ -139,7 +148,6 @@ class BackendBase(abc.ABC):
         Called once at server startup. Override to load models,
         establish connections, etc.
         """
-        pass
 
     async def teardown(self) -> None:
         """Clean up backend resources.
@@ -147,4 +155,3 @@ class BackendBase(abc.ABC):
         Called once at server shutdown. Override to release models,
         close connections, etc.
         """
-        pass

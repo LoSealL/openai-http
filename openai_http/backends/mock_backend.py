@@ -57,13 +57,15 @@ class MockTransformersBackend(BackendBase):
     real model weights. Useful for testing and development.
     """
 
-    def __init__(self, model_name: str = "mock-model"):
+    def __init__(self, model_name: str = "mock-model", thinking: bool = True):
         """Initialize the mock backend.
 
         Args:
             model_name: The model identifier string.
+            thinking: Whether to simulate reasoning/thinking output.
         """
         self.model_name = model_name
+        self.thinking = thinking
 
     @staticmethod
     def _decode_image(b64_data: str) -> dict[str, Any]:
@@ -127,6 +129,25 @@ class MockTransformersBackend(BackendBase):
             else:
                 count += 0.25
         return int(max(1, count))
+
+    @staticmethod
+    def _parse_reasoning(text: str) -> tuple[str | None, str]:
+        """Parse <think>...</think> tags from generated text.
+
+        Args:
+            text: Raw generated text that may contain <think> tags.
+
+        Returns:
+            A tuple of (reasoning_content, content). reasoning_content
+            is None if no <think> tags are found.
+        """
+        think_start = text.find("<think>")
+        think_end = text.rfind("</think>")
+        if think_start == -1 or think_end == -1 or think_end <= think_start:
+            return None, text
+        reasoning = text[think_start + 7:think_end]
+        content = text[think_end + 8:].lstrip("\n")
+        return reasoning, content
 
     @staticmethod
     def _build_prompt(messages: list[dict[str, str]]) -> str:
@@ -199,18 +220,46 @@ class MockTransformersBackend(BackendBase):
                 f"This is a simulated response. Your input was: {last_user_msg[:50]}"
             )
 
-        max_chars = int(max_tokens * 3)
-        if len(generated_text) > max_chars:
-            generated_text = generated_text[:max_chars] + "..."
+        reasoning_content: str | None = None
+        if self.thinking:
+            reasoning = (
+                f"Let me think about this... The user said: {last_user_msg[:30]}. "
+                "I should provide a helpful mock response."
+            )
+            reasoning_content = reasoning
+            full_text = f"<think>{reasoning}</think>\n{generated_text}"
+        else:
+            full_text = generated_text
 
-        completion_tokens = self._estimate_tokens(generated_text)
+        completion_tokens = self._estimate_tokens(full_text)
+        finish_reason = "stop"
+        if completion_tokens > max_tokens:
+            finish_reason = "length"
+
+        if reasoning_content:
+            parts = full_text.split("</think>", 1)
+            generated_text = parts[1].lstrip("\n") if len(parts) > 1 else ""
+            if finish_reason == "length":
+                # Truncate content to simulate hitting max_tokens
+                char_budget = max_tokens * 4
+                reasoning_budget = min(len(reasoning_content), char_budget // 2)
+                content_budget = char_budget - reasoning_budget
+                reasoning_content = reasoning_content[:reasoning_budget]
+                generated_text = generated_text[:content_budget]
+        else:
+            if finish_reason == "length":
+                generated_text = full_text[:max_tokens * 4]
+            else:
+                generated_text = full_text
 
         return {
             "generated_text": generated_text,
+            "reasoning_content": reasoning_content,
+            "finish_reason": finish_reason,
             "usage": {
                 "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
+                "completion_tokens": min(completion_tokens, max_tokens),
+                "total_tokens": prompt_tokens + min(completion_tokens, max_tokens),
             },
         }
 
@@ -218,29 +267,43 @@ class MockTransformersBackend(BackendBase):
         self,
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | dict[str, Any], None]:
         """Generate a streaming mock completion.
 
         Yields the full response in small random-sized chunks with
-        simulated delays.
+        simulated delays. When thinking is enabled, yields reasoning
+        chunks first as typed dicts, then content chunks.
 
         Args:
             prompt: A plain text string or a list of message dicts.
             **kwargs: Generation parameters forwarded to generate().
 
         Yields:
-            Text chunks as strings.
+            Text chunks or typed dicts with reasoning/content.
         """
         result = await self.generate(prompt, **kwargs)
         full_text = result["generated_text"]
+        reasoning = result.get("reasoning_content")
+
+        if reasoning:
+            idx = 0
+            while idx < len(reasoning):
+                chunk_size = random.randint(2, 6)
+                chunk = reasoning[idx : idx + chunk_size]
+                yield {"type": "reasoning", "content": chunk}
+                idx += chunk_size
+                await asyncio.sleep(random.uniform(0.01, 0.03))
 
         idx = 0
         while idx < len(full_text):
             chunk_size = random.randint(1, 4)
             chunk = full_text[idx : idx + chunk_size]
-            yield chunk
+            yield {"type": "content", "content": chunk}
             idx += chunk_size
             await asyncio.sleep(random.uniform(0.01, 0.03))
+
+        if result.get("finish_reason") == "length":
+            yield {"type": "finish", "reason": "length"}
 
     async def generate_tool_calls(
         self,
