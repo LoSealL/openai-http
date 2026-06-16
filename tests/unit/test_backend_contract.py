@@ -25,10 +25,8 @@ from openai_http.backends.contract import (
     validate_model_info,
     validate_model_list,
     validate_stream_chunk,
-    validate_tool_calls,
 )
 from openai_http.backends.types import (
-    BackendToolCall,
     ContentChunk,
     FinishChunk,
     GenerationResult,
@@ -159,37 +157,6 @@ class TestModelInfoValidation:
     def test_non_list_raises(self):
         with pytest.raises(OpenAIError):
             validate_model_list({"not": "a list"})
-
-
-class TestToolCallValidation:
-    def test_valid_call_validates(self):
-        calls = validate_tool_calls(
-            [
-                {
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "f", "arguments": "{}"},
-                }
-            ]
-        )
-        assert len(calls) == 1
-        assert isinstance(calls[0], BackendToolCall)
-
-    def test_non_string_arguments_rejected(self):
-        with pytest.raises(OpenAIError):
-            validate_tool_calls(
-                [
-                    {
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {"name": "f", "arguments": {"x": 1}},
-                    }
-                ]
-            )
-
-    def test_non_list_raises(self):
-        with pytest.raises(OpenAIError):
-            validate_tool_calls("nope")
 
 
 def test_generation_result_strict_extra_forbidden():

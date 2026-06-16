@@ -23,7 +23,6 @@ from openai_http.backends.contract import (
     validate_model_info,
     validate_model_list,
     validate_stream_chunk,
-    validate_tool_calls,
 )
 from openai_http.backends.mock_backend import MockTransformersBackend
 from openai_http.backends.types import FinishChunk
@@ -83,8 +82,8 @@ async def test_get_model_passes_schema():
 @pytest.mark.asyncio
 async def test_generate_tool_calls_passes_schema():
     backend = MockTransformersBackend()
-    raw = await backend.generate_tool_calls(
-        messages=[{"role": "user", "content": "go"}],
+    raw = await backend.generate(
+        prompt=[{"role": "user", "content": "go"}],
         tools=[
             {
                 "type": "function",
@@ -98,6 +97,6 @@ async def test_generate_tool_calls_passes_schema():
             }
         ],
     )
-    calls = validate_tool_calls(raw)
-    assert len(calls) == 1
+    calls = validate_generation(raw).tool_calls
+    assert calls is not None and len(calls) == 1
     assert calls[0].function.name == "do_thing"

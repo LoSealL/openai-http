@@ -13,18 +13,20 @@ Dependencies:
 
 import argparse
 import asyncio
-import json
-import re
+import base64
+import importlib.util
+import io
 import time
-import uuid
-from threading import Thread
+from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
 import torch
+from PIL import Image
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    AutoProcessor,
     AutoTokenizer,
-    TextIteratorStreamer,
 )
 
 import openai_http
@@ -33,130 +35,336 @@ from openai_http.backends.base import BackendBase
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-0.8B"
 
+_BACKEND_DIR = Path(__file__).resolve().parent
+
+
+def _available_parsers() -> list[str]:
+    """Names of every ``<name>_parser.py`` module beside this backend."""
+    names: list[str] = []
+    for path in _BACKEND_DIR.glob("*_parser.py"):
+        stem = path.stem
+        if stem.endswith("_parser"):
+            name = stem[: -len("_parser")]
+            if name:
+                names.append(name)
+    return sorted(set(names))
+
+
+def _load_parser(name: str, required: str) -> Any:
+    """Dynamically import ``<name>_parser.py`` and validate it has *required*.
+
+    Args:
+        name: Parser name; the module file is ``<name>_parser.py`` in this
+            backend's folder.
+        required: Fixed callable name the module must provide
+            (e.g. ``"parse_reasoning"`` or ``"parse_tool_calls"``).
+
+    Returns:
+        The loaded parser module.
+
+    Raises:
+        FileNotFoundError: If the parser file does not exist.
+        AttributeError: If the module lacks the required callable.
+    """
+    path = _BACKEND_DIR / f"{name}_parser.py"
+    if not path.exists():
+        raise FileNotFoundError(f"Parser '{name}' not found: expected {path}")
+    spec = importlib.util.spec_from_file_location(f"{name}_parser", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not build module spec for {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not callable(getattr(module, required, None)):
+        raise AttributeError(
+            f"Parser '{name}' ({path.name}) does not provide a callable '{required}'"
+        )
+    return module
+
 
 class TransformersBackend(BackendBase):
-    def __init__(self, model_id: str = DEFAULT_MODEL, temperature: float = 0.0, thinking: bool = False, max_tokens: int = 1024):
+    def __init__(
+        self,
+        model_id: str = DEFAULT_MODEL,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+        vision: bool = False,
+        reasoning_parser: str = "qwen",
+        toolcall_parser: str = "qwen",
+    ):
         self.model_id = model_id
         self.temperature = temperature
-        self.thinking = thinking
+        self.thinking = True
         self.max_tokens = max_tokens
+        self.vision = vision
+        self.reasoning_parser = reasoning_parser
+        self.toolcall_parser = toolcall_parser
         self.tokenizer = None
+        self.processor = None
         self.model = None
         self.device = None
         self._loaded_at: int | None = None
+        self._reasoning_mod: Any = None
+        self._tools_mod: Any = None
 
     async def setup(self) -> None:
         def _load():
-            device = (
-                "cuda"
-                if torch.cuda.is_available()
-                else ("mps" if torch.backends.mps.is_available() else "cpu")
-            )
-            dtype = torch.bfloat16 if device != "cpu" else torch.float32
-            tokenizer = AutoTokenizer.from_pretrained(
-                self.model_id,
-                trust_remote_code=True,
-            )
-            if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
-                tokenizer.pad_token_id = tokenizer.eos_token_id
-            model = AutoModelForCausalLM.from_pretrained(
-                self.model_id,
-                torch_dtype=dtype,
-                device_map=device if device != "mps" else None,
-                trust_remote_code=True,
-            )
-            if device == "mps":
-                model = model.to(device)
-            model.eval()
-            return tokenizer, model, device
+            if self.vision:
+                processor, tokenizer, model = self._load_vlm()
+            else:
+                tokenizer, model = self._load_text()
+                processor = tokenizer
+            return tokenizer, processor, model, "cuda"
 
-        self.tokenizer, self.model, self.device = await asyncio.to_thread(_load)
+        (
+            self.tokenizer,
+            self.processor,
+            self.model,
+            self.device,
+        ) = await asyncio.to_thread(_load)
         self._loaded_at = int(time.time())
+
+        self._reasoning_mod = _load_parser(self.reasoning_parser, "parse_reasoning")
+        self._tools_mod = _load_parser(self.toolcall_parser, "parse_tool_calls")
+
+    def _load_text(self) -> tuple[Any, Any]:
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.model_id,
+            trust_remote_code=True,
+        )
+        if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+        model = AutoModelForCausalLM.from_pretrained(
+            self.model_id,
+            torch_dtype=torch.bfloat16,
+            device_map="cuda",
+            trust_remote_code=True,
+        )
+        model.eval()
+        return tokenizer, model
+
+    def _load_vlm(self) -> tuple[Any, Any, Any]:
+        processor = AutoProcessor.from_pretrained(
+            self.model_id,
+            trust_remote_code=True,
+        )
+        tokenizer = processor.tokenizer
+        if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+        model = AutoModelForImageTextToText.from_pretrained(
+            self.model_id,
+            torch_dtype=torch.bfloat16,
+            device_map="cuda",
+            trust_remote_code=True,
+        )
+        model.eval()
+        return processor, tokenizer, model
 
     async def teardown(self) -> None:
         self.model = None
         self.tokenizer = None
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
         import gc
 
         gc.collect()
 
-    def _prepare_inputs(self, prompt: str | list[dict[str, str]], max_new_tokens: int):
-        if isinstance(prompt, list):
-            messages = prompt
-        else:
-            messages = [{"role": "user", "content": prompt}]
+    def _prepare_inputs(
+        self,
+        prompt: list[dict[str, Any]],
+        thinking: bool,
+        **extra: Any,
+    ):
+        messages = prompt
 
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=self.thinking,
-        )
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        images: list[Any] = []
+        if self.vision:
+            messages, images = self._collect_images(messages)
+        text = self._apply_template(self.processor, messages, thinking, **extra)
+        print(f"[prepare_inputs] {text}")
+        proc_kwargs: dict[str, Any] = {"text": text, "return_tensors": "pt"}
+        if images:
+            proc_kwargs["images"] = images
+        inputs = self.processor(**proc_kwargs).to(self.device)
+
         prompt_len = inputs["input_ids"].shape[1]
         return inputs, prompt_len, messages
 
-    def _decode_output(self, input_ids_len: int, output_ids) -> tuple[str, int]:
-        new_ids = output_ids[0, input_ids_len:]
-        text = self.tokenizer.decode(new_ids, skip_special_tokens=True)
-        return text, len(new_ids)
-
     @staticmethod
-    def _parse_reasoning(text: str) -> tuple[str | None, str]:
-        """Parse reasoning from generated text.
+    def _collect_images(
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[Any]]:
+        """Extract base64 data-URI images from OpenAI multimodal messages.
 
-        The opening <think> tag is part of the chat template prompt, so the
-        generated text only contains the reasoning followed by </think>
-        and the actual answer. We split on </think> only.
+        Converts OpenAI ``image_url`` content parts into the transformers
+        ``{"type": "image"}`` form and materializes each into a PIL image.
+        Only inline base64 data URIs are supported; remote URLs are dropped.
 
         Args:
-            text: Raw generated text (reasoning + </think> + answer).
+            messages: OpenAI-style chat messages, possibly with list content.
 
         Returns:
-            A tuple of (reasoning_content, content). reasoning_content
-            is None if no </think> tag is found.
+            A tuple of ``(normalized_messages, images)``.
         """
-        end_tag = "</think>"
-        idx = text.find(end_tag)
-        if idx == -1:
-            return None, text
-        reasoning = text[:idx]
-        content = text[idx + len(end_tag):].lstrip("\n")
-        return reasoning if reasoning else None, content
+        images: list[Any] = []
+        normalized: list[dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                normalized.append(msg)
+                continue
+            new_parts: list[dict[str, Any]] = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    url = ""
+                    iu = part.get("image_url")
+                    if isinstance(iu, dict):
+                        url = iu.get("url", "") or ""
+                    elif isinstance(iu, str):
+                        url = iu
+                    img = TransformersBackend._load_data_uri_image(url)
+                    if img is not None:
+                        images.append(img)
+                        new_parts.append({"type": "image"})
+                    else:
+                        new_parts.append({
+                            "type": "text",
+                            "text": "[unsupported image]",
+                        })
+                else:
+                    new_parts.append(part)
+            normalized.append({**msg, "content": new_parts})
+        return normalized, images
+
+    @staticmethod
+    def _load_data_uri_image(url: str) -> Optional[Any]:
+        """Decode a ``data:image/...;base64,...`` URI into a PIL Image.
+
+        Returns None if the URL is not a decodable base64 data URI.
+        """
+        if not isinstance(url, str) or not url.startswith("data:"):
+            return None
+        _, _, data = url.partition(",")
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except Exception:
+            return None
+        try:
+            return Image.open(io.BytesIO(raw)).convert("RGB")
+        except Exception:
+            return None
+
+    def _apply_template(
+        self,
+        template_obj: Any,
+        messages: list[dict[str, Any]],
+        thinking: bool,
+        **extra: Any,
+    ) -> str:
+        """Apply a chat template, tolerating templates without enable_thinking.
+
+        Args:
+            template_obj: A tokenizer or processor exposing ``apply_chat_template``.
+            messages: The chat messages.
+            thinking: Whether to request ``enable_thinking`` in the template.
+            **extra: Additional template kwargs (e.g. ``tools``, ``tool_choice``).
+
+        Returns:
+            The rendered prompt string.
+        """
+        common: dict[str, Any] = dict(tokenize=False, add_generation_prompt=True)
+        try:
+            return template_obj.apply_chat_template(
+                messages, enable_thinking=thinking, **common, **extra
+            )
+        except (TypeError, ValueError):
+            return template_obj.apply_chat_template(messages, **common, **extra)
+
+    def _sample_flags(
+        self, temperature: float, kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build sampling kwargs (do_sample/temperature/top_p)."""
+        flags: dict[str, Any] = {"do_sample": temperature > 0}
+        if temperature > 0:
+            flags["temperature"] = temperature
+            if "top_p" in kwargs:
+                flags["top_p"] = float(kwargs["top_p"])
+        return flags
+
+    def _generate_simple(
+        self,
+        inputs: dict[str, Any],
+        prompt_len: int,
+        max_new_tokens: int,
+        temperature: float,
+        kwargs: dict[str, Any],
+    ) -> tuple[str, int]:
+        """Single-pass generation without a reasoning budget."""
+        gen_kwargs = {
+            **inputs,
+            "max_new_tokens": max_new_tokens,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            **self._sample_flags(temperature, kwargs),
+        }
+        with torch.no_grad():
+            output_ids = self.model.generate(**gen_kwargs)
+        new_ids = output_ids[0, prompt_len:]
+        text = self.tokenizer.decode(new_ids, skip_special_tokens=True)
+        return text, int(new_ids.shape[0])
 
     async def generate(
         self,
-        prompt: str | list[dict[str, str]],
+        prompt: list[dict[str, Any]],
         **kwargs: Any,
     ) -> dict:
+        thinking = bool(kwargs.get("enable_thinking", self.thinking))
         max_new_tokens = int(kwargs.get("max_tokens", self.max_tokens))
         temperature = float(kwargs.get("temperature", self.temperature))
 
-        def _sync_generate():
-            inputs, prompt_len, _ = self._prepare_inputs(prompt, max_new_tokens)
-            gen_kwargs = {
-                **inputs,
-                "max_new_tokens": max_new_tokens,
-                "do_sample": temperature > 0,
-                "pad_token_id": self.tokenizer.pad_token_id,
+        tools = kwargs.get("tools")
+        tool_choice = kwargs.get("tool_choice")
+        tc_extra: dict[str, Any] = {}
+        if tools and tool_choice != "none":
+            tc = tool_choice
+            if isinstance(tc, dict):
+                name = tc.get("function", {}).get("name")
+                if name:
+                    tc = name
+            tc_extra = {
+                "tools": tools,
+                "tool_choice": tc if tc != "auto" else None,
             }
-            if temperature > 0:
-                gen_kwargs["temperature"] = temperature
-                if "top_p" in kwargs:
-                    gen_kwargs["top_p"] = float(kwargs["top_p"])
-            with torch.no_grad():
-                output_ids = self.model.generate(**gen_kwargs)
-            return inputs, prompt_len, output_ids
 
-        inputs, prompt_len, output_ids = await asyncio.to_thread(_sync_generate)
-        generated_text, completion_tokens = self._decode_output(prompt_len, output_ids)
+        inputs, prompt_len, _ = await asyncio.to_thread(
+            self._prepare_inputs, prompt, thinking, **tc_extra
+        )
+        generated_text, completion_tokens = await asyncio.to_thread(
+            self._generate_simple,
+            inputs,
+            prompt_len,
+            max_new_tokens,
+            temperature,
+            kwargs,
+        )
+        print(f"[generate] {generated_text}")
 
-        reasoning_content: str | None = None
-        if self.thinking:
-            reasoning_content, generated_text = self._parse_reasoning(generated_text)
+        if tc_extra:
+            tool_calls = self._tools_mod.parse_tool_calls(generated_text)[1]
+            if tool_calls:
+                return {
+                    "generated_text": None,
+                    "tool_calls": tool_calls,
+                    "finish_reason": "tool_calls",
+                    "usage": {
+                        "prompt_tokens": prompt_len,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_len + completion_tokens,
+                    },
+                }
 
+        reasoning_content = None
+        if thinking:
+            reasoning_content, generated_text = self._reasoning_mod.parse_reasoning(
+                generated_text
+            )
         finish_reason = "length" if completion_tokens >= max_new_tokens else "stop"
 
         return {
@@ -172,175 +380,11 @@ class TransformersBackend(BackendBase):
 
     async def generate_stream(
         self,
-        prompt: str | list[dict[str, str]],
+        prompt: list[dict[str, Any]],
         **kwargs: Any,
     ) -> AsyncGenerator[str | dict[str, Any], None]:
-        """Generate a streaming completion with reasoning support.
-
-        When thinking is enabled, yields reasoning chunks as typed
-        dicts before content chunks. Otherwise yields content dicts.
-
-        Args:
-            prompt: A plain text string or a list of message dicts.
-            **kwargs: Generation parameters.
-
-        Yields:
-            Typed dicts: {"type": "reasoning", "content": ...} or
-            {"type": "content", "content": ...}.
-        """
-        max_new_tokens = int(kwargs.get("max_tokens", self.max_tokens))
-        temperature = float(kwargs.get("temperature", self.temperature))
-
-        inputs, _, _ = self._prepare_inputs(prompt, max_new_tokens)
-        streamer = TextIteratorStreamer(
-            self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True,
-        )
-
-        gen_kwargs = {
-            **inputs,
-            "max_new_tokens": max_new_tokens,
-            "do_sample": temperature > 0,
-            "pad_token_id": self.tokenizer.pad_token_id,
-            "streamer": streamer,
-        }
-        if temperature > 0:
-            gen_kwargs["temperature"] = temperature
-            if "top_p" in kwargs:
-                gen_kwargs["top_p"] = float(kwargs["top_p"])
-
-        chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
-        loop = asyncio.get_running_loop()
-
-        def _producer():
-            gen_thread = Thread(target=self.model.generate, kwargs=dict(gen_kwargs))
-            gen_thread.start()
-            try:
-                for text in streamer:
-                    if text:
-                        loop.call_soon_threadsafe(chunk_queue.put_nowait, text)
-            finally:
-                gen_thread.join()
-                loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
-
-        loop.run_in_executor(None, _producer)
-
-        state = "thinking" if self.thinking else "answering"
-        buf = ""
-        end_think_tag = "</think>"
-        token_count = 0
-
-        while True:
-            chunk = await chunk_queue.get()
-            if chunk is None:
-                break
-            token_count += 1
-            buf += chunk
-
-            while buf:
-                if state == "thinking":
-                    idx = buf.find(end_think_tag)
-                    if idx != -1:
-                        reasoning = buf[:idx]
-                        if reasoning:
-                            yield {"type": "reasoning", "content": reasoning}
-                        buf = buf[idx + len(end_think_tag):]
-                        state = "answering"
-                    else:
-                        safe = len(buf) - (len(end_think_tag) - 1)
-                        if safe > 0:
-                            yield {"type": "reasoning", "content": buf[:safe]}
-                            buf = buf[safe:]
-                        break
-
-                else:
-                    yield {"type": "content", "content": buf}
-                    buf = ""
-
-        if buf:
-            if state == "thinking":
-                yield {"type": "reasoning", "content": buf}
-            else:
-                yield {"type": "content", "content": buf}
-
-        if token_count >= max_new_tokens:
-            yield {"type": "finish", "reason": "length"}
-
-    async def generate_tool_calls(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        tool_choice = kwargs.get("tool_choice", "auto")
-        if tool_choice == "none":
-            return []
-
-        tc_for_template = tool_choice
-        if isinstance(tool_choice, dict):
-            func_name = tool_choice.get("function", {}).get("name")
-            if func_name:
-                tc_for_template = func_name
-
-        def _sync_generate():
-            text = self.tokenizer.apply_chat_template(
-                messages,
-                tools=tools,
-                tool_choice=tc_for_template if tc_for_template != "auto" else None,
-                tokenize=False,
-                add_generation_prompt=True,
-                enable_thinking=self.thinking,
-            )
-            inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
-
-            gen_kwargs = {
-                **inputs,
-                "max_new_tokens": 512,
-                "do_sample": self.temperature > 0,
-                "pad_token_id": self.tokenizer.pad_token_id,
-            }
-            if self.temperature > 0:
-                gen_kwargs["temperature"] = self.temperature
-            with torch.no_grad():
-                output_ids = self.model.generate(**gen_kwargs)
-
-            prompt_len = inputs["input_ids"].shape[1]
-            generated_text = self.tokenizer.decode(
-                output_ids[0, prompt_len:],
-                skip_special_tokens=True,
-            )
-            return generated_text
-
-        generated_text = await asyncio.to_thread(_sync_generate)
-        return self._parse_tool_calls(generated_text)
-
-    @staticmethod
-    def _parse_tool_calls(text: str) -> list[dict[str, Any]]:
-        pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
-        matches = re.findall(pattern, text, re.DOTALL)
-
-        if not matches:
-            return []
-
-        tool_calls = []
-        for match in matches:
-            try:
-                call = json.loads(match.strip())
-                tool_calls.append(
-                    {
-                        "id": f"call_{uuid.uuid4().hex[:24]}",
-                        "type": "function",
-                        "function": {
-                            "name": call.get("name", ""),
-                            "arguments": json.dumps(call.get("arguments", {})),
-                        },
-                    }
-                )
-            except json.JSONDecodeError:
-                continue
-
-        return tool_calls
+        yield ""
+        raise NotImplementedError("Streaming is not supported by this backend")
 
     async def list_models(self) -> list[dict]:
         return [
@@ -368,7 +412,8 @@ if __name__ == "__main__":
         description="Serve a HuggingFace Transformers model via the OpenAI-compatible API."
     )
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         default=DEFAULT_MODEL,
         help=f"HuggingFace model ID (default: {DEFAULT_MODEL})",
     )
@@ -378,7 +423,8 @@ if __name__ == "__main__":
         help="Server bind address (default: 0.0.0.0)",
     )
     parser.add_argument(
-        "--port", "-p",
+        "--port",
+        "-p",
         type=int,
         default=8000,
         help="Server port (default: 8000)",
@@ -390,9 +436,18 @@ if __name__ == "__main__":
         help="Sampling temperature (default: 0.0 for greedy)",
     )
     parser.add_argument(
-        "--thinking",
-        action="store_true",
-        help="Enable reasoning tokens via <think> tags (default: off)",
+        "--reasoning-parser",
+        default="qwen",
+        choices=_available_parsers(),
+        help="Reasoning parser module (<name>_parser.py beside this file). "
+        "Default: qwen.",
+    )
+    parser.add_argument(
+        "--tool-call-parser",
+        default="qwen",
+        choices=_available_parsers(),
+        help="Tool-call parser module (<name>_parser.py beside this file). "
+        "Default: qwen.",
     )
     parser.add_argument(
         "--max-tokens",
@@ -400,12 +455,20 @@ if __name__ == "__main__":
         default=1024,
         help="Maximum new tokens per response (default: 1024)",
     )
+    parser.add_argument(
+        "--vision",
+        "-vl",
+        action="store_true",
+        help="Load as a vision-language model to accept image inputs (base64 data URIs)",
+    )
     args = parser.parse_args()
 
     backend = TransformersBackend(
         model_id=args.model,
         temperature=args.temperature,
-        thinking=args.thinking,
         max_tokens=args.max_tokens,
+        vision=args.vision,
+        reasoning_parser=args.reasoning_parser,
+        toolcall_parser=args.tool_call_parser,
     )
     openai_http.run_server(backend=backend, host=args.host, port=args.port)

@@ -150,31 +150,6 @@ class BackendBase(abc.ABC):
         """
         raise NotImplementedError("Embeddings are not supported by this backend")
 
-    async def generate_tool_calls(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        """Generate tool/function call responses.
-
-        Args:
-            messages: The conversation history.
-            tools: The tool definitions available to the model.
-            **kwargs: Additional parameters including tool_choice.
-
-        Returns:
-            A list of mappings conforming to
-            :class:`openai_http.backends.types.BackendToolCall`. Each
-            entry must include ``id``, ``type="function"``, and a
-            ``function`` mapping with ``name`` and a JSON-encoded
-            ``arguments`` string.
-
-        Raises:
-            NotImplementedError: If tool calls are not supported.
-        """
-        raise NotImplementedError("Tool calls are not supported by this backend")
-
     async def setup(self) -> None:
         """Initialize backend resources.
 

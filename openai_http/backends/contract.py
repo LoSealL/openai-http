@@ -30,7 +30,6 @@ from typing import Any
 from pydantic import ValidationError
 
 from openai_http.backends.types import (
-    BackendToolCall,
     ContentChunk,
     FinishChunk,
     GenerationResult,
@@ -170,27 +169,3 @@ def validate_model_list(raw: Any) -> list[ModelInfo]:
             status_code=500,
         )
     return [validate_model_info(m) for m in raw]
-
-
-def validate_tool_calls(raw: Any) -> list[BackendToolCall]:
-    """Coerce a backend ``generate_tool_calls`` return value to typed calls."""
-    if not isinstance(raw, list):
-        raise OpenAIError(
-            message=(
-                f"Backend generate_tool_calls must return a list, "
-                f"got {type(raw).__name__}"
-            ),
-            error_type="server_error",
-            code="backend_contract_error",
-            status_code=500,
-        )
-    out: list[BackendToolCall] = []
-    for item in raw:
-        if isinstance(item, BackendToolCall):
-            out.append(item)
-            continue
-        try:
-            out.append(BackendToolCall.model_validate(item))
-        except ValidationError as exc:
-            raise _contract_error("tool call", exc) from exc
-    return out

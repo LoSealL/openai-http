@@ -67,13 +67,6 @@ async def test_default_embed_raises_not_implemented():
 
 
 @pytest.mark.asyncio
-async def test_default_generate_tool_calls_raises_not_implemented():
-    """The default generate_tool_calls() raises NotImplementedError."""
-    b = _CompleteBackend()
-    with pytest.raises(NotImplementedError):
-        await b.generate_tool_calls([], [])
-
-
 @pytest.mark.asyncio
 async def test_setup_noop():
     """The default setup() is a no-op and does not raise."""

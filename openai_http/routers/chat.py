@@ -30,20 +30,17 @@ from openai_http.auth import verify_api_key
 from openai_http.backends.contract import (
     validate_generation,
     validate_stream_chunk,
-    validate_tool_calls,
 )
 from openai_http.backends.types import (
     BackendToolCall,
     ContentChunk,
     FinishChunk,
-    GenerationResult,
     GenerationUsage,
     ReasoningChunk,
 )
 from openai_http.errors import (
     InvalidRequestError,
     NotFoundError,
-    NotImplementedOpenAIError,
 )
 from openai_http.schemas.chat import (
     ChatCompletionChunk,
@@ -130,37 +127,14 @@ async def chat_completions(
         kwargs["temperature"] = body.temperature
     if body.top_p is not None:
         kwargs["top_p"] = body.top_p
+    extra = body.model_extra or {}
+    if "enable_thinking" in extra:
+        kwargs["enable_thinking"] = extra["enable_thinking"]
 
-    use_tools = (
-        body.tools is not None
-        and len(body.tools) > 0
-        and body.tool_choice != "none"
-    )
-    tool_calls_result: list[BackendToolCall] | None = None
-    tool_finish_reason: Literal["tool_calls"] | None = None
-
-    if use_tools and body.tools is not None:
-        tc_kwargs: dict[str, Any] = {}
-        if body.tool_choice is not None:
-            tc_kwargs["tool_choice"] = body.tool_choice
-        if hasattr(backend, "generate_tool_calls"):
-            try:
-                raw_tool_calls = await backend.generate_tool_calls(
-                    messages,
-                    [t.model_dump() for t in body.tools],
-                    **tc_kwargs,
-                )
-            except NotImplementedError:
-                raise NotImplementedOpenAIError(
-                    "Tool calls are not supported by this backend"
-                )
-            tool_calls_result = validate_tool_calls(raw_tool_calls)
-
-        if tool_calls_result:
-            tool_finish_reason = "tool_calls"
-            kwargs["tools"] = [t.model_dump() for t in body.tools]
-            if body.tool_choice is not None:
-                kwargs["tool_choice"] = body.tool_choice
+    if body.tools and body.tool_choice != "none":
+        kwargs["tools"] = [t.model_dump() for t in body.tools]
+    if body.tool_choice is not None:
+        kwargs["tool_choice"] = body.tool_choice
 
     if body.stream:
 
@@ -179,59 +153,40 @@ async def chat_completions(
                         delta=DeltaMessage(role="assistant"),
                     )
 
-                    if tool_finish_reason == "tool_calls" and tool_calls_result:
-                        delta_tool_calls = [
-                            {
-                                "index": i,
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
-                                },
-                            }
-                            for i, tc in enumerate(tool_calls_result)
-                        ]
+                    stream_finish_reason: Literal[
+                        "stop", "length", "tool_calls", "content_filter"
+                    ] = "stop"
+                    async for token in backend.generate_stream(messages, **kwargs):
+                        chunk = validate_stream_chunk(token)
+                        delta: DeltaMessage
+                        if isinstance(chunk, FinishChunk):
+                            stream_finish_reason = chunk.reason
+                            continue
+                        if isinstance(chunk, ReasoningChunk):
+                            delta = DeltaMessage(reasoning_content=chunk.content)
+                        elif isinstance(chunk, ContentChunk):
+                            delta = DeltaMessage(content=chunk.content)
+                        else:
+                            delta = DeltaMessage(content=chunk)
                         yield _make_chunk(
-                            request_id, body.model, created,
-                            delta=DeltaMessage(tool_calls=delta_tool_calls),
-                            finish_reason="tool_calls",
+                            request_id, body.model, created, delta=delta,
                         )
-                    else:
-                        stream_finish_reason: Literal[
-                            "stop", "length", "tool_calls", "content_filter"
-                        ] = "stop"
-                        async for token in backend.generate_stream(messages, **kwargs):
-                            chunk = validate_stream_chunk(token)
-                            delta: DeltaMessage
-                            if isinstance(chunk, FinishChunk):
-                                stream_finish_reason = chunk.reason
-                                continue
-                            if isinstance(chunk, ReasoningChunk):
-                                delta = DeltaMessage(reasoning_content=chunk.content)
-                            elif isinstance(chunk, ContentChunk):
-                                delta = DeltaMessage(content=chunk.content)
-                            else:
-                                delta = DeltaMessage(content=chunk)
-                            yield _make_chunk(
-                                request_id, body.model, created, delta=delta,
-                            )
 
-                        final_usage: UsageInfo | None = None
-                        if body.stream_options and body.stream_options.get(
-                            "include_usage"
-                        ):
-                            final_usage = UsageInfo(
-                                prompt_tokens=0,
-                                completion_tokens=0,
-                                total_tokens=0,
-                            )
-                        yield _make_chunk(
-                            request_id, body.model, created,
-                            delta=DeltaMessage(),
-                            finish_reason=stream_finish_reason,
-                            usage=final_usage,
+                    final_usage: UsageInfo | None = None
+                    if body.stream_options and body.stream_options.get(
+                        "include_usage"
+                    ):
+                        final_usage = UsageInfo(
+                            prompt_tokens=0,
+                            completion_tokens=0,
+                            total_tokens=0,
                         )
+                    yield _make_chunk(
+                        request_id, body.model, created,
+                        delta=DeltaMessage(),
+                        finish_reason=stream_finish_reason,
+                        usage=final_usage,
+                    )
 
                     yield "data: [DONE]\n\n"
 
@@ -260,27 +215,8 @@ async def chat_completions(
         )
 
     async with queue.acquire():
-        if tool_finish_reason == "tool_calls" and tool_calls_result:
-            prompt_tok = sum(
-                max(1, int(len(str(m.get("content", ""))) * 0.25)) for m in messages
-            )
-            comp_tok = sum(
-                max(1, int(len(tc.function.arguments) * 0.25))
-                for tc in tool_calls_result
-            )
-            result = GenerationResult(
-                generated_text=None,
-                tool_calls=tool_calls_result,
-                finish_reason="tool_calls",
-                usage=GenerationUsage(
-                    prompt_tokens=prompt_tok,
-                    completion_tokens=comp_tok,
-                    total_tokens=prompt_tok + comp_tok,
-                ),
-            )
-        else:
-            raw_result = await backend.generate(messages, **kwargs)
-            result = validate_generation(raw_result)
+        raw_result = await backend.generate(messages, **kwargs)
+        result = validate_generation(raw_result)
 
     message = ChoiceMessage(
         content=result.generated_text,
@@ -300,7 +236,7 @@ async def chat_completions(
             Choice(
                 index=0,
                 message=message,
-                finish_reason=tool_finish_reason or result.finish_reason,
+                finish_reason=result.finish_reason,
             )
         ],
         usage=_usage_to_wire(result.usage),

@@ -183,9 +183,10 @@ class MockTransformersBackend(BackendBase):
         Args:
             prompt: A plain text string or a list of message dicts.
             **kwargs: Generation parameters (max_tokens, temperature, etc.).
+                When ``tools`` is present, a mock tool-call response is returned.
 
         Returns:
-            A dict with generated_text and usage token counts.
+            A dict with generated_text (or tool_calls) and usage token counts.
         """
         self._log_payload("generate", prompt=prompt, **kwargs)
 
@@ -193,6 +194,11 @@ class MockTransformersBackend(BackendBase):
             messages = prompt
         else:
             messages = [{"role": "user", "content": prompt}]
+
+        tools = kwargs.get("tools")
+        tool_choice = kwargs.get("tool_choice", "auto")
+        if tools and tool_choice != "none":
+            return self._make_mock_tool_calls(messages, tools, tool_choice)
 
         max_tokens = kwargs.get("max_tokens", 512)
         temperature = kwargs.get("temperature", 0.7)
@@ -241,7 +247,6 @@ class MockTransformersBackend(BackendBase):
             parts = full_text.split("</think>", 1)
             generated_text = parts[1].lstrip("\n") if len(parts) > 1 else ""
             if finish_reason == "length":
-                # Truncate content to simulate hitting max_tokens
                 char_budget = max_tokens * 4
                 reasoning_budget = min(len(reasoning_content), char_budget // 2)
                 content_budget = char_budget - reasoning_budget
@@ -253,8 +258,6 @@ class MockTransformersBackend(BackendBase):
             else:
                 generated_text = full_text
 
-        # Re-estimate completion tokens against the actual emitted text
-        # so the usage block matches what the client receives.
         emitted = (reasoning_content or "") + (generated_text or "")
         if emitted:
             completion_tokens = min(
@@ -271,6 +274,59 @@ class MockTransformersBackend(BackendBase):
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
+
+    def _make_mock_tool_calls(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: Any,
+    ) -> dict[str, Any]:
+        """Produce a mock tool-call response."""
+        if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+            target_name = tool_choice.get("function", {}).get("name")
+            candidates = [
+                t for t in tools if t.get("function", {}).get("name") == target_name
+            ]
+        elif tool_choice == "required":
+            candidates = tools
+        else:
+            candidates = tools
+
+        if not candidates:
+            return {
+                "generated_text": None,
+                "finish_reason": "stop",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10},
+            }
+
+        selected = candidates[0]
+        func_def = selected.get("function", {})
+        func_name = func_def.get("name", "unknown_function")
+        params = func_def.get("parameters", {})
+        props = params.get("properties", {})
+        fake_args = {k: "mock_value" for k in props}
+
+        prompt_tok = sum(max(1, int(len(str(m.get("content", ""))) * 0.25)) for m in messages)
+        comp_tok = max(1, int(len(json.dumps(fake_args)) * 0.25))
+        return {
+            "generated_text": None,
+            "tool_calls": [
+                {
+                    "id": f"call_{random.randbytes(6).hex()}",
+                    "type": "function",
+                    "function": {
+                        "name": func_name,
+                        "arguments": json.dumps(fake_args),
+                    },
+                }
+            ],
+            "finish_reason": "tool_calls",
+            "usage": {
+                "prompt_tokens": prompt_tok,
+                "completion_tokens": comp_tok,
+                "total_tokens": prompt_tok + comp_tok,
             },
         }
 
@@ -315,63 +371,6 @@ class MockTransformersBackend(BackendBase):
 
         if result.get("finish_reason") == "length":
             yield {"type": "finish", "reason": "length"}
-
-    async def generate_tool_calls(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        """Generate mock tool/function call responses.
-
-        Args:
-            messages: The conversation history.
-            tools: The tool definitions available to the model.
-            **kwargs: Additional parameters including tool_choice.
-
-        Returns:
-            A list of tool call dicts with mock argument values.
-        """
-        self._log_payload(
-            "generate_tool_calls", messages=messages, tools=tools, **kwargs
-        )
-
-        if not tools:
-            return []
-        tool_choice = kwargs.get("tool_choice", "auto")
-        if tool_choice == "none":
-            return []
-
-        if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
-            target_name = tool_choice.get("function", {}).get("name")
-            candidates = [
-                t for t in tools if t.get("function", {}).get("name") == target_name
-            ]
-        elif tool_choice == "required":
-            candidates = tools
-        else:
-            candidates = tools
-
-        if not candidates:
-            return []
-
-        selected = candidates[0]
-        func_def = selected.get("function", {})
-        func_name = func_def.get("name", "unknown_function")
-        params = func_def.get("parameters", {})
-        props = params.get("properties", {})
-        fake_args = {k: "mock_value" for k in props}
-
-        return [
-            {
-                "id": f"call_{random.randbytes(6).hex()}",
-                "type": "function",
-                "function": {
-                    "name": func_name,
-                    "arguments": json.dumps(fake_args),
-                },
-            }
-        ]
 
     async def embed(
         self,
