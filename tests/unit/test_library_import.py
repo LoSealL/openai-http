@@ -23,7 +23,7 @@ import socket
 def test_public_api_names_exposed():
     """Verify that openai_http exposes the expected public API names."""
     import openai_http
-    expected = {"BackendBase", "run_server", "setup_logging", "__version__"}
+    expected = {"BackendBase", "ParserBase", "run_server", "setup_logging", "__version__"}
     assert expected.issubset(set(dir(openai_http)))
     assert set(openai_http.__all__) == expected
 
