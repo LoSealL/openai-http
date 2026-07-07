@@ -131,7 +131,9 @@ class OnnxRuntimeBackend(BackendBase):
         # EOS tokens from generation_config.json
         self.eos_token_ids = {248046, 248044}
 
-    def _load_onnx_model(self, onnx_dir: str, base_name: str, providers: list[str]) -> ort.InferenceSession:
+    def _load_onnx_model(
+        self, onnx_dir: str, base_name: str, providers: list[str]
+    ) -> ort.InferenceSession:
         """Load an ONNX model, optionally with a dtype suffix.
 
         Tries ``{base_name}_{dtype}.onnx`` first, then falls back to
@@ -142,7 +144,9 @@ class OnnxRuntimeBackend(BackendBase):
             if os.path.exists(dtype_path):
                 print(f"  Loading {base_name}_{self.dtype}.onnx")
                 return ort.InferenceSession(dtype_path, providers=providers)
-            print(f"  Warning: {base_name}_{self.dtype}.onnx not found, falling back to {base_name}.onnx")
+            print(
+                f"  Warning: {base_name}_{self.dtype}.onnx not found, falling back to {base_name}.onnx"
+            )
         base_path = os.path.join(onnx_dir, f"{base_name}.onnx")
         print(f"  Loading {base_name}.onnx")
         return ort.InferenceSession(base_path, providers=providers)
@@ -178,6 +182,23 @@ class OnnxRuntimeBackend(BackendBase):
                 print(f"Warning: {self.provider} not available. Using CPU.")
                 providers = ["CPUExecutionProvider"]
 
+            # ponytail: CUDA's GroupQueryAttention kernel can't apply
+            # attention_bias with a float16 KV cache (raises
+            # "attention_bias is not supported in GroupQueryAttention cuda
+            # kernel"). Prefer TensorRT, whose unclaimable ops fall back to
+            # CPU (not CUDA), so GQA never hits the broken CUDA path. Pure
+            # CPU if TRT is unavailable. Remove this shunt if ORT CUDA
+            # gains fp16 attention_bias support.
+            if self.dtype in ("fp16", "q4f16") and "CUDAExecutionProvider" in providers:
+                if "TensorrtExecutionProvider" in available_providers:
+                    providers = ["TensorrtExecutionProvider"]
+                else:
+                    providers = ["CPUExecutionProvider"]
+                print(
+                    f"Note: using {providers[0]} for fp16 "
+                    "(CUDA GQA kernel lacks fp16 attention_bias support)"
+                )
+
             print(f"Using ONNX Runtime providers: {providers}")
             if self.dtype:
                 print(f"Using dtype variant: {self.dtype}")
@@ -190,24 +211,34 @@ class OnnxRuntimeBackend(BackendBase):
             if self.vision:
                 vision_path = os.path.join(onnx_dir, "vision_encoder.onnx")
                 if self.dtype:
-                    dtype_vision = os.path.join(onnx_dir, f"vision_encoder_{self.dtype}.onnx")
+                    dtype_vision = os.path.join(
+                        onnx_dir, f"vision_encoder_{self.dtype}.onnx"
+                    )
                     if os.path.exists(dtype_vision):
                         vision_path = dtype_vision
                 if os.path.exists(vision_path):
                     print(f"  Loading {os.path.basename(vision_path)}")
-                    vision_session = ort.InferenceSession(vision_path, providers=providers)
+                    vision_session = ort.InferenceSession(
+                        vision_path, providers=providers
+                    )
                 else:
                     print("  Warning: vision_encoder.onnx not found, vision disabled")
                     self.vision = False
 
             # Load decoder model
-            decoder_session = self._load_onnx_model(onnx_dir, "decoder_model_merged", providers)
+            decoder_session = self._load_onnx_model(
+                onnx_dir, "decoder_model_merged", providers
+            )
 
             return tokenizer, processor, embed_session, vision_session, decoder_session
 
-        self.tokenizer, self.processor, self.embed_session, self.vision_session, self.decoder_session = (
-            await asyncio.to_thread(_load)
-        )
+        (
+            self.tokenizer,
+            self.processor,
+            self.embed_session,
+            self.vision_session,
+            self.decoder_session,
+        ) = await asyncio.to_thread(_load)
         self._loaded_at = int(time.time())
 
         self._reasoning_parser = get_parser(self.reasoning_parser)
@@ -247,20 +278,21 @@ class OnnxRuntimeBackend(BackendBase):
     def _init_past_states(self, batch_size: int = 1) -> dict[str, np.ndarray]:
         """Initialize empty past states for the first forward pass."""
         past_states = {}
+        dtype = np.float16 if self.dtype in ("fp16", "q4f16") else np.float32
         for layer_idx in range(self.num_layers):
             if layer_idx % 4 == 3:  # Full attention layers
                 past_states[f"past_key_values.{layer_idx}.key"] = np.zeros(
-                    (batch_size, 2, 0, 256), dtype=np.float32
+                    (batch_size, 2, 0, 256), dtype=dtype
                 )
                 past_states[f"past_key_values.{layer_idx}.value"] = np.zeros(
-                    (batch_size, 2, 0, 256), dtype=np.float32
+                    (batch_size, 2, 0, 256), dtype=dtype
                 )
             else:  # Linear attention layers
                 past_states[f"past_conv.{layer_idx}"] = np.zeros(
-                    (batch_size, 6144, 3), dtype=np.float32
+                    (batch_size, 6144, 3), dtype=dtype
                 )
                 past_states[f"past_recurrent.{layer_idx}"] = np.zeros(
-                    (batch_size, 16, 128, 128), dtype=np.float32
+                    (batch_size, 16, 128, 128), dtype=dtype
                 )
         return past_states
 
@@ -271,12 +303,18 @@ class OnnxRuntimeBackend(BackendBase):
         output_idx = 1
         for layer_idx in range(self.num_layers):
             if layer_idx % 4 == 3:  # Full attention layers
-                past_states[f"past_key_values.{layer_idx}.key"] = decoder_outputs[output_idx]
-                past_states[f"past_key_values.{layer_idx}.value"] = decoder_outputs[output_idx + 1]
+                past_states[f"past_key_values.{layer_idx}.key"] = decoder_outputs[
+                    output_idx
+                ]
+                past_states[f"past_key_values.{layer_idx}.value"] = decoder_outputs[
+                    output_idx + 1
+                ]
                 output_idx += 2
             else:  # Linear attention layers
                 past_states[f"past_conv.{layer_idx}"] = decoder_outputs[output_idx]
-                past_states[f"past_recurrent.{layer_idx}"] = decoder_outputs[output_idx + 1]
+                past_states[f"past_recurrent.{layer_idx}"] = decoder_outputs[
+                    output_idx + 1
+                ]
                 output_idx += 2
         return past_states
 
@@ -346,7 +384,10 @@ class OnnxRuntimeBackend(BackendBase):
                         images.append(img)
                         new_parts.append({"type": "image"})
                     else:
-                        new_parts.append({"type": "text", "text": "[unsupported image]"})
+                        new_parts.append({
+                            "type": "text",
+                            "text": "[unsupported image]",
+                        })
                 else:
                     new_parts.append(part)
             normalized.append({**msg, "content": new_parts})
@@ -400,7 +441,10 @@ class OnnxRuntimeBackend(BackendBase):
                 image_features = image_features[:num_pads]
             else:
                 # Pad with zeros if fewer features than pad positions
-                padding = np.zeros((num_pads - num_features, image_features.shape[1]), dtype=image_features.dtype)
+                padding = np.zeros(
+                    (num_pads - num_features, image_features.shape[1]),
+                    dtype=image_features.dtype,
+                )
                 image_features = np.concatenate([image_features, padding], axis=0)
 
         # Replace embeddings at image pad positions
@@ -444,14 +488,19 @@ class OnnxRuntimeBackend(BackendBase):
             # Run vision encoder
             pixel_values = proc_inputs["pixel_values"].astype(np.float32)
             image_grid_thw = proc_inputs["image_grid_thw"].astype(np.int64)
-            vision_outputs = self.vision_session.run(None, {
-                "pixel_values": pixel_values,
-                "image_grid_thw": image_grid_thw,
-            })
+            vision_outputs = self.vision_session.run(
+                None,
+                {
+                    "pixel_values": pixel_values,
+                    "image_grid_thw": image_grid_thw,
+                },
+            )
             image_features = vision_outputs[0]
 
             # Merge image features into text embeddings
-            inputs_embeds = self._merge_vision_embeddings(inputs_embeds, input_ids, image_features)
+            inputs_embeds = self._merge_vision_embeddings(
+                inputs_embeds, input_ids, image_features
+            )
         else:
             # Text-only path
             input_ids = np.array([self.tokenizer.encode(chat_text)], dtype=np.int64)
@@ -523,7 +572,9 @@ class OnnxRuntimeBackend(BackendBase):
 
             # Embed single token
             next_token_array = np.array([[next_token_id]], dtype=np.int64)
-            embed_outputs = self.embed_session.run(None, {"input_ids": next_token_array})
+            embed_outputs = self.embed_session.run(
+                None, {"input_ids": next_token_array}
+            )
             inputs_embeds = embed_outputs[0]
 
             # Position for new token
@@ -706,7 +757,9 @@ class OnnxRuntimeBackend(BackendBase):
 
         def _yield_new_text():
             nonlocal yielded_text
-            full_text = self.tokenizer.decode(accumulated_tokens, skip_special_tokens=False)
+            full_text = self.tokenizer.decode(
+                accumulated_tokens, skip_special_tokens=False
+            )
 
             # Find common prefix between yielded_text and full_text
             common_len = 0
@@ -720,8 +773,8 @@ class OnnxRuntimeBackend(BackendBase):
             new_text = full_text[common_len:]
 
             # If new_text ends with replacement char, it might be incomplete
-            if new_text and new_text.endswith('\ufffd'):
-                clean_text = new_text.rstrip('\ufffd')
+            if new_text and new_text.endswith("\ufffd"):
+                clean_text = new_text.rstrip("\ufffd")
                 yielded_text += clean_text
                 return clean_text if clean_text else None
 
@@ -742,7 +795,9 @@ class OnnxRuntimeBackend(BackendBase):
 
             # Embed single token
             next_token_array = np.array([[next_token_id]], dtype=np.int64)
-            embed_outputs = self.embed_session.run(None, {"input_ids": next_token_array})
+            embed_outputs = self.embed_session.run(
+                None, {"input_ids": next_token_array}
+            )
             inputs_embeds = embed_outputs[0]
 
             # Position for new token
@@ -866,15 +921,13 @@ if __name__ == "__main__":
         "--reasoning-parser",
         default="qwen",
         choices=available_parsers(),
-        help="Reasoning parser name (registered in openai_http.parser). "
-        "Default: qwen.",
+        help="Reasoning parser name (registered in openai_http.parser). Default: qwen.",
     )
     parser.add_argument(
         "--tool-call-parser",
         default="qwen",
         choices=available_parsers(),
-        help="Tool-call parser name (registered in openai_http.parser). "
-        "Default: qwen.",
+        help="Tool-call parser name (registered in openai_http.parser). Default: qwen.",
     )
     parser.add_argument(
         "--vision",
