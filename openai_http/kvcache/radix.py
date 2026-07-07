@@ -188,6 +188,7 @@ class RadixKVCache(Generic[H]):
             return
         del parent.children[leaf.key[0]]
         self._total_tokens -= len(leaf.key)
+        assert self._total_tokens >= 0, "total_tokens went negative during eviction"
         self._evictions += len(leaf.key)
         # Prune now-childless internal nodes with refcount == 0.
         while (
@@ -199,11 +200,14 @@ class RadixKVCache(Generic[H]):
             assert grand is not None
             del grand.children[parent.key[0]]
             self._total_tokens -= len(parent.key)
+            assert self._total_tokens >= 0, "total_tokens went negative during eviction"
             self._evictions += len(parent.key)
             parent = grand
 
     def _evict_if_over_budget(self) -> None:
         """Lazy LRU eviction: evict oldest evictable leaves until under budget."""
+        # ponytail: O(N) tree walk + heap rebuild per over-budget insert;
+        # maintain an incremental leaf min-heap if eviction becomes hot.
         if self._max_tokens is None:
             return
         if self._total_tokens <= self._max_tokens:
@@ -216,7 +220,13 @@ class RadixKVCache(Generic[H]):
             self._delete_leaf(leaf)
 
     def match(self, token_ids: Sequence[int]) -> PrefixMatch[H]:
-        """Return the longest cached prefix of ``token_ids``."""
+        """Return the longest cached prefix of ``token_ids``.
+
+        Note:
+            On a partial-edge match, this method splits the child node
+            (a structural mutation) to expose a precise boundary, and
+            memoizes the ``slice_fn`` result on the new internal node.
+        """
         with self._lock:
             node = self._root
             remaining = tuple(token_ids)
@@ -246,6 +256,8 @@ class RadixKVCache(Generic[H]):
     def insert(self, token_ids: Sequence[int], handle: H) -> None:
         """Insert (or refresh) a sequence -> handle mapping."""
         with self._lock:
+            if not token_ids:
+                return
             seq = tuple(token_ids)
             node = self._root
             now = self._tick()
