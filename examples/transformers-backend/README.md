@@ -227,26 +227,32 @@ Only base64 data URIs (`data:image/...;base64,...`) are supported for
   `tool_choice` in the chat completion request.
 - **Parsers** (`--reasoning-parser` / `--tool-call-parser`, default
   `qwen`): reasoning and tool-call output are parsed by a pluggable
-  module discovered by name. The backend dynamically imports
-  `<name>_parser.py` from this folder and calls its fixed-signature
-  functions. The bundled `qwen_parser.py` handles Qwen 3 / 3.5
-  (`</think>` reasoning split, `<tool_call>{json}</tool_call>` tools).
+  parser resolved by name from the `openai_http.parser` registry. The
+  built-in parsers are `qwen` (Qwen 3 / 3.5: `</think>` reasoning split,
+  `<tool_call>{json}</tool_call>` tools), `cpm` (MiniCPM5:
+  `<function>/<param>` tools — requires `skip_special_tokens=False`),
+  and `lfm` (`[func(k=v)]` tools).
 
-  To support another format, drop a `<name>_parser.py` file next to
-  `qwen_parser.py` exposing these symbols:
+  To support another format, subclass `openai_http.parser.ParserBase`
+  and register it before starting the server:
 
   ```python
-  REASONING_END_MARKER = "</think>"        # str; "" if reasoning isn't tagged
+  from openai_http.parser import ParserBase, register_parser
 
-  def parse_reasoning(model_output: str) -> tuple[str | None, str]:
-      """Return (reasoning, content). reasoning is None if no marker."""
+  class MyParser(ParserBase):
+      REASONING_END_MARKER = "</think>"
 
-  def parse_tool_calls(model_output: str) -> tuple[str, list[dict]]:
-      """Return (content_without_tools, tool_calls)."""
+      def parse_reasoning(self, model_output):
+          ...   # return ReasoningResult(reasoning, content)
+
+      def parse_tool_calls(self, model_output):
+          ...   # return ToolCallResult(content, tool_calls)
+
+  register_parser("mine", MyParser())
   ```
 
   Then run with `--reasoning-parser <name>` / `--tool-call-parser <name>`.
-  Run `--help` to list every parser discovered in the folder.
+  Run `--help` to list every registered parser.
 - **Vision** (`--vision` / `-vl`) loads the model as a
   vision-language model via `AutoProcessor` +
   `AutoModelForImageTextToText` and accepts multimodal messages with

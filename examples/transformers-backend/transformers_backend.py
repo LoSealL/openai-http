@@ -14,10 +14,8 @@ Dependencies:
 import argparse
 import asyncio
 import base64
-import importlib.util
 import io
 import time
-from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
 import torch
@@ -31,60 +29,22 @@ from transformers import (
 
 import openai_http
 from openai_http.backends.base import BackendBase
+from openai_http.parser import (
+    ParserBase,
+    available_parsers,
+    get_parser,
+    strip_special_tokens,
+)
 
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-0.8B"
-
-_BACKEND_DIR = Path(__file__).resolve().parent
-
-
-def _available_parsers() -> list[str]:
-    """Names of every ``<name>_parser.py`` module beside this backend."""
-    names: list[str] = []
-    for path in _BACKEND_DIR.glob("*_parser.py"):
-        stem = path.stem
-        if stem.endswith("_parser"):
-            name = stem[: -len("_parser")]
-            if name:
-                names.append(name)
-    return sorted(set(names))
-
-
-def _load_parser(name: str, required: str) -> Any:
-    """Dynamically import ``<name>_parser.py`` and validate it has *required*.
-
-    Args:
-        name: Parser name; the module file is ``<name>_parser.py`` in this
-            backend's folder.
-        required: Fixed callable name the module must provide
-            (e.g. ``"parse_reasoning"`` or ``"parse_tool_calls"``).
-
-    Returns:
-        The loaded parser module.
-
-    Raises:
-        FileNotFoundError: If the parser file does not exist.
-        AttributeError: If the module lacks the required callable.
-    """
-    path = _BACKEND_DIR / f"{name}_parser.py"
-    if not path.exists():
-        raise FileNotFoundError(f"Parser '{name}' not found: expected {path}")
-    spec = importlib.util.spec_from_file_location(f"{name}_parser", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not build module spec for {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    if not callable(getattr(module, required, None)):
-        raise AttributeError(
-            f"Parser '{name}' ({path.name}) does not provide a callable '{required}'"
-        )
-    return module
 
 
 class TransformersBackend(BackendBase):
     def __init__(
         self,
         model_id: str = DEFAULT_MODEL,
+        name: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1024,
         vision: bool = False,
@@ -92,6 +52,7 @@ class TransformersBackend(BackendBase):
         toolcall_parser: str = "qwen",
     ):
         self.model_id = model_id
+        self.model_name = name or model_id
         self.temperature = temperature
         self.thinking = True
         self.max_tokens = max_tokens
@@ -103,8 +64,8 @@ class TransformersBackend(BackendBase):
         self.model = None
         self.device = None
         self._loaded_at: int | None = None
-        self._reasoning_mod: Any = None
-        self._tools_mod: Any = None
+        self._reasoning_parser: ParserBase | None = None
+        self._tools_parser: ParserBase | None = None
 
     async def setup(self) -> None:
         def _load():
@@ -123,8 +84,8 @@ class TransformersBackend(BackendBase):
         ) = await asyncio.to_thread(_load)
         self._loaded_at = int(time.time())
 
-        self._reasoning_mod = _load_parser(self.reasoning_parser, "parse_reasoning")
-        self._tools_mod = _load_parser(self.toolcall_parser, "parse_tool_calls")
+        self._reasoning_parser = get_parser(self.reasoning_parser)
+        self._tools_parser = get_parser(self.toolcall_parser)
 
     def _load_text(self) -> tuple[Any, Any]:
         tokenizer = AutoTokenizer.from_pretrained(
@@ -289,6 +250,15 @@ class TransformersBackend(BackendBase):
                 flags["top_p"] = float(kwargs["top_p"])
         return flags
 
+    def _strip_specials(self, text: str) -> str:
+        """Remove the tokenizer's special tokens from free text.
+
+        Wraps :func:`openai_http.parser.strip_special_tokens` with this
+        backend's tokenizer; used after parsing when a parser required
+        the specials to be kept through decoding.
+        """
+        return strip_special_tokens(text, self.tokenizer.all_special_tokens)
+
     def _generate_simple(
         self,
         inputs: dict[str, Any],
@@ -296,6 +266,7 @@ class TransformersBackend(BackendBase):
         max_new_tokens: int,
         temperature: float,
         kwargs: dict[str, Any],
+        skip_special_tokens: bool,
     ) -> tuple[str, int]:
         """Single-pass generation without a reasoning budget."""
         gen_kwargs = {
@@ -307,7 +278,7 @@ class TransformersBackend(BackendBase):
         with torch.no_grad():
             output_ids = self.model.generate(**gen_kwargs)
         new_ids = output_ids[0, prompt_len:]
-        text = self.tokenizer.decode(new_ids, skip_special_tokens=True)
+        text = self.tokenizer.decode(new_ids, skip_special_tokens=skip_special_tokens)
         return text, int(new_ids.shape[0])
 
     async def generate(
@@ -336,6 +307,17 @@ class TransformersBackend(BackendBase):
         inputs, prompt_len, _ = await asyncio.to_thread(
             self._prepare_inputs, prompt, thinking, **tc_extra
         )
+
+        # Decode adaptively: when a parser in use needs special tokens
+        # preserved (e.g. CpmParser, whose <function/<param tags are
+        # special tokens), decode with skip_special_tokens=False and
+        # strip the leftover framing specials from the final free text
+        # only after parsing completes.
+        assert self._reasoning_parser is not None and self._tools_parser is not None
+        keep_specials = (
+            self._reasoning_parser.REQUIRES_SPECIAL_TOKENS
+            or self._tools_parser.REQUIRES_SPECIAL_TOKENS
+        )
         generated_text, completion_tokens = await asyncio.to_thread(
             self._generate_simple,
             inputs,
@@ -343,14 +325,31 @@ class TransformersBackend(BackendBase):
             max_new_tokens,
             temperature,
             kwargs,
+            not keep_specials,
         )
         print(f"[generate] {generated_text}")
 
         if tc_extra:
-            tool_calls = self._tools_mod.parse_tool_calls(generated_text)[1]
-            if tool_calls:
+            tool_result = self._tools_parser.parse_tool_calls(generated_text)
+            if tool_result.tool_calls:
+                tool_calls = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                        },
+                    }
+                    for tc in tool_result.tool_calls
+                ]
+                # Tool-call arguments are already structured; only the
+                # residual content text needs special-token cleanup.
+                content = tool_result.content
+                if keep_specials:
+                    content = self._strip_specials(content)
                 return {
-                    "generated_text": None,
+                    "generated_text": content or None,
                     "tool_calls": tool_calls,
                     "finish_reason": "tool_calls",
                     "usage": {
@@ -362,9 +361,13 @@ class TransformersBackend(BackendBase):
 
         reasoning_content = None
         if thinking:
-            reasoning_content, generated_text = self._reasoning_mod.parse_reasoning(
-                generated_text
-            )
+            r = self._reasoning_parser.parse_reasoning(generated_text)
+            reasoning_content = r.reasoning
+            generated_text = r.content
+        if keep_specials:
+            if reasoning_content is not None:
+                reasoning_content = self._strip_specials(reasoning_content)
+            generated_text = self._strip_specials(generated_text)
         finish_reason = "length" if completion_tokens >= max_new_tokens else "stop"
 
         return {
@@ -389,7 +392,7 @@ class TransformersBackend(BackendBase):
     async def list_models(self) -> list[dict]:
         return [
             {
-                "id": self.model_id,
+                "id": self.model_name,
                 "object": "model",
                 "created": self._loaded_at or int(time.time()),
                 "owned_by": "huggingface",
@@ -397,10 +400,10 @@ class TransformersBackend(BackendBase):
         ]
 
     async def get_model(self, model_id: str) -> Optional[dict]:
-        if model_id != self.model_id:
+        if model_id != self.model_name:
             return None
         return {
-            "id": self.model_id,
+            "id": self.model_name,
             "object": "model",
             "created": self._loaded_at or int(time.time()),
             "owned_by": "huggingface",
@@ -416,6 +419,12 @@ if __name__ == "__main__":
         "-m",
         default=DEFAULT_MODEL,
         help=f"HuggingFace model ID (default: {DEFAULT_MODEL})",
+    )
+    parser.add_argument(
+        "--name",
+        "-n",
+        default=None,
+        help="Custom model name to serve (overrides --model for API responses)",
     )
     parser.add_argument(
         "--host",
@@ -438,15 +447,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--reasoning-parser",
         default="qwen",
-        choices=_available_parsers(),
-        help="Reasoning parser module (<name>_parser.py beside this file). "
+        choices=available_parsers(),
+        help="Reasoning parser name (registered in openai_http.parser). "
         "Default: qwen.",
     )
     parser.add_argument(
         "--tool-call-parser",
         default="qwen",
-        choices=_available_parsers(),
-        help="Tool-call parser module (<name>_parser.py beside this file). "
+        choices=available_parsers(),
+        help="Tool-call parser name (registered in openai_http.parser). "
         "Default: qwen.",
     )
     parser.add_argument(
@@ -465,6 +474,7 @@ if __name__ == "__main__":
 
     backend = TransformersBackend(
         model_id=args.model,
+        name=args.name,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         vision=args.vision,
