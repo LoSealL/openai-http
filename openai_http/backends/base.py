@@ -37,6 +37,8 @@ class BackendBase(abc.ABC):
     that raise NotImplementedError for unsupported functionality.
     """
 
+    _openai_http_initialized: bool = False
+
     @abc.abstractmethod
     async def generate(
         self,
