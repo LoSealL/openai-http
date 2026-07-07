@@ -62,7 +62,7 @@ class _TreeNode(Generic[H]):
         self.parent: "_TreeNode | None" = parent
         self.children: dict[int, _TreeNode] = {}
         self.refcount: int = 0
-        self.last_used: float = 0.0
+        self.last_used: int = 0
         self.prefix_len: int = prefix_len
 
 
@@ -90,10 +90,10 @@ class RadixKVCache(Generic[H]):
     when Tier 2 batch scheduling arrives.
 
     ``last_used`` is a logical clock (monotonic integer tick), not
-    wall-clock time: ``time.monotonic()`` on Windows has ~15ms
-    resolution, so back-to-back inserts in the same request would
-    share a timestamp and break LRU ordering. A counter guarantees
-    strict ordering under tight loops.
+    wall-clock time: ``time.monotonic()`` can return identical values
+    for back-to-back calls in a tight loop, which would collapse LRU
+    ordering for inserts within the same request. A counter guarantees
+    strict, deterministic ordering under tight loops.
     """
 
     def __init__(
@@ -131,7 +131,7 @@ class RadixKVCache(Generic[H]):
         self._clock += 1
         return self._clock
 
-    def _split_node(self, child: _TreeNode[H], k: int, now: float) -> _TreeNode[H]:
+    def _split_node(self, child: _TreeNode[H], k: int, now: int) -> _TreeNode[H]:
         """Split ``child`` into a new internal node + ``child``.
 
         ``child.key`` is split at position ``k``: the new internal node
@@ -199,6 +199,7 @@ class RadixKVCache(Generic[H]):
             assert grand is not None
             del grand.children[parent.key[0]]
             self._total_tokens -= len(parent.key)
+            self._evictions += len(parent.key)
             parent = grand
 
     def _evict_if_over_budget(self) -> None:
@@ -344,13 +345,33 @@ class RadixKVCache(Generic[H]):
             n = n.parent
 
     def stats(self) -> CacheStats:
-        """Return a snapshot. Full implementation in Task 4."""
+        """Return a snapshot of cache state.
+
+        Walks the tree once to compute ``node_count``,
+        ``evictable_tokens``, and ``protected_tokens``.
+        ``total_tokens``, ``hits``, ``misses``, and ``evictions`` are
+        tracked incrementally.
+        """
         with self._lock:
+            node_count = 0
+            evictable = 0
+            protected = 0
+            stack: list[_TreeNode] = [self._root]
+            while stack:
+                n = stack.pop()
+                if n is not self._root:
+                    node_count += 1
+                    if n.refcount > 0:
+                        protected += len(n.key)
+                    elif not n.children:
+                        evictable += len(n.key)
+                for c in n.children.values():
+                    stack.append(c)
             return CacheStats(
                 total_tokens=self._total_tokens,
-                node_count=0,
-                evictable_tokens=0,
-                protected_tokens=0,
+                node_count=node_count,
+                evictable_tokens=evictable,
+                protected_tokens=protected,
                 hits=self._hits,
                 misses=self._misses,
                 evictions=self._evictions,
