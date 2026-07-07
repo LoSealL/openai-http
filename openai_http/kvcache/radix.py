@@ -21,8 +21,8 @@ bigram/page/session/event features. The generic<->tensor bridge is a
 single ``slice_fn`` callable the backend supplies.
 """
 
+import heapq
 import threading
-import time
 from typing import Generic, Sequence, TypeVar
 
 from openai_http.kvcache.types import CacheStats, PrefixMatch, SliceFn
@@ -62,7 +62,7 @@ class _TreeNode(Generic[H]):
         self.parent: "_TreeNode | None" = parent
         self.children: dict[int, _TreeNode] = {}
         self.refcount: int = 0
-        self.last_used: float = time.monotonic()
+        self.last_used: float = 0.0
         self.prefix_len: int = prefix_len
 
 
@@ -88,6 +88,12 @@ class RadixKVCache(Generic[H]):
     queue serializes requests, so contention is zero — but the lock
     is cheap and removes a "works until concurrency changes" trap
     when Tier 2 batch scheduling arrives.
+
+    ``last_used`` is a logical clock (monotonic integer tick), not
+    wall-clock time: ``time.monotonic()`` on Windows has ~15ms
+    resolution, so back-to-back inserts in the same request would
+    share a timestamp and break LRU ordering. A counter guarantees
+    strict ordering under tight loops.
     """
 
     def __init__(
@@ -116,6 +122,14 @@ class RadixKVCache(Generic[H]):
         # ponytail: global lock; per-node locks only if a future batch
         # scheduler contends. Cheap under serial execution today.
         self._lock = threading.Lock()
+        # Logical clock: each tick is one observed operation. Cheaper
+        # and finer-grained than time.monotonic() under tight loops.
+        self._clock = 0
+
+    def _tick(self) -> int:
+        """Advance the logical clock and return the new timestamp."""
+        self._clock += 1
+        return self._clock
 
     def _split_node(self, child: _TreeNode[H], k: int, now: float) -> _TreeNode[H]:
         """Split ``child`` into a new internal node + ``child``.
@@ -155,12 +169,57 @@ class RadixKVCache(Generic[H]):
         parent.children[new_node.key[0]] = new_node
         return new_node
 
+    def _collect_evictable_leaves(self) -> list[_TreeNode[H]]:
+        """Return all leaf nodes (non-root, no children) with refcount == 0."""
+        result: list[_TreeNode[H]] = []
+        stack: list[_TreeNode[H]] = [self._root]
+        while stack:
+            n = stack.pop()
+            if n is not self._root and not n.children and n.refcount == 0:
+                result.append(n)
+            for c in n.children.values():
+                stack.append(c)
+        return result
+
+    def _delete_leaf(self, leaf: _TreeNode[H]) -> None:
+        """Detach ``leaf`` from its parent and prune childless ancestors."""
+        parent = leaf.parent
+        if parent is None:
+            return
+        del parent.children[leaf.key[0]]
+        self._total_tokens -= len(leaf.key)
+        self._evictions += len(leaf.key)
+        # Prune now-childless internal nodes with refcount == 0.
+        while (
+            parent is not self._root
+            and not parent.children
+            and parent.refcount == 0
+        ):
+            grand = parent.parent
+            assert grand is not None
+            del grand.children[parent.key[0]]
+            self._total_tokens -= len(parent.key)
+            parent = grand
+
+    def _evict_if_over_budget(self) -> None:
+        """Lazy LRU eviction: evict oldest evictable leaves until under budget."""
+        if self._max_tokens is None:
+            return
+        if self._total_tokens <= self._max_tokens:
+            return
+        leaves = self._collect_evictable_leaves()
+        heap = [(lf.last_used, id(lf), lf) for lf in leaves]
+        heapq.heapify(heap)
+        while self._total_tokens > self._max_tokens and heap:
+            _, _, leaf = heapq.heappop(heap)
+            self._delete_leaf(leaf)
+
     def match(self, token_ids: Sequence[int]) -> PrefixMatch[H]:
         """Return the longest cached prefix of ``token_ids``."""
         with self._lock:
             node = self._root
             remaining = tuple(token_ids)
-            now = time.monotonic()
+            now = self._tick()
             node.last_used = now
             while remaining:
                 child = node.children.get(remaining[0])
@@ -188,7 +247,7 @@ class RadixKVCache(Generic[H]):
         with self._lock:
             seq = tuple(token_ids)
             node = self._root
-            now = time.monotonic()
+            now = self._tick()
             node.last_used = now
             pos = 0
             while pos < len(seq):
@@ -205,6 +264,7 @@ class RadixKVCache(Generic[H]):
                     leaf.last_used = now
                     node.children[first] = leaf
                     self._total_tokens += len(remainder)
+                    self._evict_if_over_budget()
                     return
                 k = _common_prefix_len(child.key, seq[pos:])
                 if k == len(child.key):
@@ -221,18 +281,67 @@ class RadixKVCache(Generic[H]):
                     break
             node.handle = handle
             node.last_used = now
+            self._evict_if_over_budget()
 
     def evict(self, num_tokens: int) -> int:
-        """Force-evict leaf nodes. Implemented in Task 3."""
-        return 0
+        """Force-evict at least ``num_tokens`` worth of leaf nodes.
+
+        Evicts leaves with ``refcount == 0`` in least-``last_used``
+        order. Returns the actual number of tokens evicted (may exceed
+        the request).
+        """
+        with self._lock:
+            leaves = self._collect_evictable_leaves()
+            heap = [(lf.last_used, id(lf), lf) for lf in leaves]
+            heapq.heapify(heap)
+            evicted = 0
+            while evicted < num_tokens and heap:
+                _, _, leaf = heapq.heappop(heap)
+                before = self._total_tokens
+                self._delete_leaf(leaf)
+                evicted += before - self._total_tokens
+            return evicted
 
     def pin(self, token_ids: Sequence[int]) -> None:
-        """Increment refcount along the path. Implemented in Task 3."""
-        return None
+        """Increment refcount along the path to the deepest matching node.
+
+        Protects the matched prefix from eviction. Pair with ``unpin``
+        when the caller is done using the handle.
+        """
+        with self._lock:
+            node = self._deepest_node(tuple(token_ids))
+            self._adjust_ref(node, +1)
 
     def unpin(self, token_ids: Sequence[int]) -> None:
-        """Decrement refcount along the path. Implemented in Task 3."""
-        return None
+        """Decrement refcount along the path to the deepest matching node."""
+        with self._lock:
+            node = self._deepest_node(tuple(token_ids))
+            self._adjust_ref(node, -1)
+
+    def _deepest_node(self, seq: tuple[int, ...]) -> _TreeNode[H]:
+        """Walk the tree to the deepest node fully covered by ``seq``."""
+        node = self._root
+        remaining = seq
+        while remaining:
+            child = node.children.get(remaining[0])
+            if child is None:
+                break
+            k = _common_prefix_len(child.key, remaining)
+            if k == len(child.key):
+                node = child
+                remaining = remaining[k:]
+            else:
+                break
+        return node
+
+    def _adjust_ref(self, node: _TreeNode[H], delta: int) -> None:
+        """Apply ``delta`` to refcount on ``node`` and all ancestors up to root."""
+        n: _TreeNode[H] | None = node
+        while n is not None and n is not self._root:
+            n.refcount += delta
+            if n.refcount < 0:
+                n.refcount = 0
+            n = n.parent
 
     def stats(self) -> CacheStats:
         """Return a snapshot. Full implementation in Task 4."""

@@ -125,3 +125,70 @@ def test_slice_fn_called_once_per_split():
     assert call_count[0] == 1
     cache.match([1, 2, 9])  # should not trigger another slice
     assert call_count[0] == 1
+
+
+def test_eviction_under_budget():
+    """When total tokens exceed max_tokens, oldest evictable leaves are removed."""
+    cache = _make_cache(max_tokens=6)
+    cache.insert([1, 2, 3], (10, 20, 30))  # 3 tokens
+    cache.insert([4, 5, 6], (40, 50, 60))  # 3 tokens, total 6 (at budget)
+    # Inserting a 3rd sequence pushes total to 9 > 6; oldest leaf evicted.
+    cache.insert([7, 8, 9], (70, 80, 90))
+    stats = cache.stats()
+    assert stats.total_tokens <= 6
+    # The first-inserted [1,2,3] should have been evicted (oldest).
+    r = cache.match([1, 2, 3])
+    assert r.num_tokens == 0
+
+
+def test_eviction_keeps_recent():
+    """After eviction, recently-used sequences are still matched."""
+    cache = _make_cache(max_tokens=6)
+    cache.insert([1, 2, 3], (10, 20, 30))
+    cache.insert([4, 5, 6], (40, 50, 60))
+    # Touch [1,2,3] to make it more recent than [4,5,6].
+    cache.match([1, 2, 3])
+    cache.insert([7, 8, 9], (70, 80, 90))
+    r_recent = cache.match([1, 2, 3])
+    assert r_recent.num_tokens == 3
+    r_evicted = cache.match([4, 5, 6])
+    assert r_evicted.num_tokens == 0
+
+
+def test_refcount_blocks_eviction():
+    """A pinned node is not evicted even when it is the LRU candidate."""
+    cache = _make_cache(max_tokens=6)
+    cache.insert([1, 2, 3], (10, 20, 30))
+    cache.pin([1, 2, 3])
+    cache.insert([4, 5, 6], (40, 50, 60))  # total 6, at budget
+    cache.insert([7, 8, 9], (70, 80, 90))  # would evict [1,2,3] but it's pinned
+    # [1,2,3] survives because it was pinned.
+    r = cache.match([1, 2, 3])
+    assert r.num_tokens == 3
+    cache.unpin([1, 2, 3])
+    # Now a subsequent over-budget insert can evict it.
+    cache.insert([10, 11, 12], (100, 110, 120))
+    stats = cache.stats()
+    assert stats.total_tokens <= 6
+
+
+def test_evict_returns_token_count():
+    """evict(num_tokens) returns the actual number of tokens evicted."""
+    cache = _make_cache(max_tokens=None)
+    cache.insert([1, 2, 3], (10, 20, 30))
+    cache.insert([4, 5, 6], (40, 50, 60))
+    evicted = cache.evict(4)
+    assert evicted >= 4
+
+
+def test_eviction_prunes_childless_internal_nodes():
+    """After all leaves under an internal node are evicted, the internal node is pruned."""
+    cache = _make_cache(max_tokens=3)
+    # [1,2] is the shared prefix; [1,2,3] and [1,2,4] are leaves.
+    cache.insert([1, 2, 3], (10, 20, 30))
+    cache.insert([1, 2, 4], (11, 22, 44))
+    # Insert something else to trigger eviction of both [1,2,3] and [1,2,4].
+    cache.insert([9, 9, 9], (99, 99, 99))
+    # The internal node for [1,2] should have been pruned.
+    r = cache.match([1, 2, 3])
+    assert r.num_tokens == 0
