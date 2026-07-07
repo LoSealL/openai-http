@@ -117,6 +117,44 @@ class RadixKVCache(Generic[H]):
         # scheduler contends. Cheap under serial execution today.
         self._lock = threading.Lock()
 
+    def _split_node(self, child: _TreeNode[H], k: int, now: float) -> _TreeNode[H]:
+        """Split ``child`` into a new internal node + ``child``.
+
+        ``child.key`` is split at position ``k``: the new internal node
+        gets ``child.key[:k]`` and a handle covering the cumulative
+        prefix up to the split; ``child`` keeps ``child.key[k:]`` and
+        its original handle.
+
+        Args:
+            child: The node to split.
+            k: Number of leading tokens of ``child.key`` that match.
+            now: Current monotonic timestamp for ``last_used``.
+
+        Returns:
+            The new internal node (which replaces ``child`` in its
+            parent's children dict).
+        """
+        parent = child.parent
+        assert parent is not None
+        # A splittable child is never the root, so it always has a real handle.
+        assert child.handle is not None
+        split_len_cum = child.prefix_len - len(child.key) + k
+        new_handle = self._slice_fn(child.handle, split_len_cum)
+        new_node = _TreeNode[H](
+            key=child.key[:k],
+            handle=new_handle,
+            parent=parent,
+            prefix_len=split_len_cum,
+        )
+        new_node.refcount = child.refcount
+        new_node.last_used = now
+        child_remainder_first = child.key[k]
+        new_node.children[child_remainder_first] = child
+        child.key = child.key[k:]
+        child.parent = new_node
+        parent.children[new_node.key[0]] = new_node
+        return new_node
+
     def match(self, token_ids: Sequence[int]) -> PrefixMatch[H]:
         """Return the longest cached prefix of ``token_ids``."""
         with self._lock:
@@ -134,8 +172,8 @@ class RadixKVCache(Generic[H]):
                     node = child
                     remaining = remaining[k:]
                 elif k > 0:
-                    # Partial edge match — splitting arrives in Task 2.
-                    # For now, stop at the parent.
+                    node = self._split_node(child, k, now)
+                    remaining = remaining[k:]
                     break
                 else:
                     break
@@ -174,11 +212,11 @@ class RadixKVCache(Generic[H]):
                     node = child
                     pos += k
                 elif k > 0:
-                    # Splitting arrives in Task 2. For now, stop and
-                    # refresh the deepest full-edge node.
-                    node = child
+                    new_internal = self._split_node(child, k, now)
+                    node = new_internal
                     pos += k
-                    break
+                    # Continue the loop: next iteration either creates
+                    # a new leaf for the divergent suffix or descends.
                 else:
                     break
             node.handle = handle

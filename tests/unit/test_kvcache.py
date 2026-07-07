@@ -67,3 +67,61 @@ def test_insert_refreshes_handle():
     cache.insert([1, 2, 3], (40, 50, 60))
     result = cache.match([1, 2, 3])
     assert result.handle == (40, 50, 60)
+
+
+def test_partial_hit_at_edge_boundary():
+    """Insert [1,2,3,4], match [1,2,9] -> handle covers first 2 tokens via edge split."""
+    cache = _make_cache()
+    cache.insert([1, 2, 3, 4], (10, 20, 30, 40))
+    result = cache.match([1, 2, 9])
+    assert result.num_tokens == 2
+    assert result.handle == (10, 20)
+
+
+def test_split_then_descend_into_sibling():
+    """After a split, a subsequent insert descends through the new internal node."""
+    cache = _make_cache()
+    cache.insert([1, 2, 3, 4], (10, 20, 30, 40))
+    cache.insert([1, 2, 9, 9], (11, 22, 33, 44))
+    # Both [1,2,3,...] and [1,2,9,...] should match up to [1,2].
+    r1 = cache.match([1, 2, 3, 4])
+    assert r1.num_tokens == 4
+    assert r1.handle == (10, 20, 30, 40)
+    r2 = cache.match([1, 2, 9, 9])
+    assert r2.num_tokens == 4
+    assert r2.handle == (11, 22, 33, 44)
+    # And a shorter query matches only the shared [1,2] prefix.
+    r3 = cache.match([1, 2, 7])
+    assert r3.num_tokens == 2
+    assert r3.handle == (10, 20)
+
+
+def test_slice_fn_memoized_on_split_node():
+    """The slice_fn is called exactly once per split; the result is reused."""
+    cache = _make_cache()
+    cache.insert([1, 2, 3, 4], (10, 20, 30, 40))
+    # First match triggers the split and calls slice_fn once.
+    cache.match([1, 2, 9])
+    # Second match at the same boundary must not call slice_fn again.
+    cache.match([1, 2, 9])
+    # We cannot count calls on a lambda; instead verify the split node's
+    # handle is set (it was memoized) and stable across matches.
+    r1 = cache.match([1, 2, 9])
+    r2 = cache.match([1, 2, 9])
+    assert r1.handle == r2.handle == (10, 20)
+
+
+def test_slice_fn_called_once_per_split():
+    """slice_fn is invoked exactly once when an edge is split."""
+    call_count = [0]
+
+    def counting_slice(h, n):
+        call_count[0] += 1
+        return h[:n]
+
+    cache = RadixKVCache(max_tokens=None, slice_fn=counting_slice)
+    cache.insert([1, 2, 3, 4], (10, 20, 30, 40))
+    cache.match([1, 2, 9])  # triggers split
+    assert call_count[0] == 1
+    cache.match([1, 2, 9])  # should not trigger another slice
+    assert call_count[0] == 1
