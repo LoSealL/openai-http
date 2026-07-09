@@ -216,7 +216,9 @@ async def openai_error_handler(request: Request, exc: OpenAIError) -> JSONRespon
     )
 
 
-async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
     """Handle Pydantic / FastAPI request validation errors.
 
     Args:

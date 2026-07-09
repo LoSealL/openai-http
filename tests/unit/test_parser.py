@@ -147,7 +147,7 @@ def test_qwen_parse_tool_calls_agent_format():
 def test_qwen_parse_tool_calls_strips_blocks():
     p = get_parser("qwen")
     res = p.parse_tool_calls(
-        "I'll check.\n<tool_call>{\"name\": \"f\", \"arguments\": {}}</tool_call>"
+        'I\'ll check.\n<tool_call>{"name": "f", "arguments": {}}</tool_call>'
     )
     assert "I'll check." in res.content
     assert "<tool_call>" not in res.content
@@ -258,7 +258,7 @@ def test_lfm_parse_tool_calls_dotted_name():
 
 def test_lfm_parse_tool_calls_strips_blocks():
     p = get_parser("lfm")
-    res = p.parse_tool_calls('prefix [f(x=1)] suffix')
+    res = p.parse_tool_calls("prefix [f(x=1)] suffix")
     assert "<" not in res.content  # no markup, but blocks stripped
     assert "prefix" in res.content
     assert "suffix" in res.content

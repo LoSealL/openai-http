@@ -23,7 +23,14 @@ import socket
 def test_public_api_names_exposed():
     """Verify that openai_http exposes the expected public API names."""
     import openai_http
-    expected = {"BackendBase", "ParserBase", "run_server", "setup_logging", "__version__"}
+
+    expected = {
+        "BackendBase",
+        "ParserBase",
+        "run_server",
+        "setup_logging",
+        "__version__",
+    }
     assert expected.issubset(set(dir(openai_http)))
     assert set(openai_http.__all__) == expected
 
@@ -37,6 +44,7 @@ def test_import_does_not_open_ports():
 def test_setup_logging_idempotent():
     """Calling setup_logging multiple times adds at most one handler."""
     import openai_http
+
     logger = logging.getLogger("openai_http")
     before = len(logger.handlers)
     openai_http.setup_logging()
@@ -51,6 +59,7 @@ def test_setup_logging_idempotent():
 def test_setup_logging_sets_level():
     """setup_logging respects the level argument."""
     import openai_http
+
     logger = logging.getLogger("openai_http")
     openai_http.setup_logging(level="debug")
     assert logger.level == logging.DEBUG

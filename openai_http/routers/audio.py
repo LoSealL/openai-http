@@ -34,7 +34,9 @@ async def transcribe_audio() -> None:
     Raises:
         NotImplementedOpenAIError: Always, as this backend does not support transcription.
     """
-    raise NotImplementedOpenAIError("Audio transcription is not supported by this backend")
+    raise NotImplementedOpenAIError(
+        "Audio transcription is not supported by this backend"
+    )
 
 
 @router.post("/v1/audio/translations")
@@ -44,7 +46,9 @@ async def translate_audio() -> None:
     Raises:
         NotImplementedOpenAIError: Always, as this backend does not support translation.
     """
-    raise NotImplementedOpenAIError("Audio translation is not supported by this backend")
+    raise NotImplementedOpenAIError(
+        "Audio translation is not supported by this backend"
+    )
 
 
 @router.post("/v1/audio/speech")

@@ -39,7 +39,7 @@ def _iter_sse_events(text: str):
         line = line.strip()
         if not line.startswith("data:"):
             continue
-        payload = line[len("data:"):].strip()
+        payload = line[len("data:") :].strip()
         if not payload or payload == "[DONE]":
             continue
         yield json.loads(payload)

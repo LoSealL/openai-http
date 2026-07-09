@@ -25,7 +25,10 @@ class _CompleteBackend(BackendBase):
     """A backend implementing all required abstract methods."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"

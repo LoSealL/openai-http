@@ -65,4 +65,6 @@ async def retrieve_model(model_id: str, request: Request) -> JSONResponse:
     if raw is None:
         raise NotFoundError(message=f"The model '{model_id}' does not exist")
     info = validate_model_info(raw)
-    return JSONResponse(content=Model(**info.model_dump()).model_dump(exclude_none=True))
+    return JSONResponse(
+        content=Model(**info.model_dump()).model_dump(exclude_none=True)
+    )

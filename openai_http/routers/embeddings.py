@@ -18,7 +18,6 @@ Embeddings endpoint.
 POST /v1/embeddings - generate vector embeddings
 """
 
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 

@@ -38,9 +38,7 @@ from openai_http.parser.base import (
 # Matches [function_name(key=value, ...)] or [module.function(...)]
 _TOOL_CALL_RE = re.compile(r"\[([\w.]+)\((.*?)\)\]", re.DOTALL)
 # Matches a single key=value pair; value may be quoted, numeric, boolean, or bare.
-_PARAM_RE = re.compile(
-    r'(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^,\)]+)'
-)
+_PARAM_RE = re.compile(r'(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^,\)]+)')
 
 
 class LfmParser(ParserBase):
@@ -104,9 +102,13 @@ def _parse_args(raw: str) -> dict[str, object]:
     for match in _PARAM_RE.finditer(raw):
         key = match.group(1)
         value: object = match.group(2)
-        if isinstance(value, str) and len(value) >= 2 and (
-            (value[0] == '"' and value[-1] == '"')
-            or (value[0] == "'" and value[-1] == "'")
+        if (
+            isinstance(value, str)
+            and len(value) >= 2
+            and (
+                (value[0] == '"' and value[-1] == '"')
+                or (value[0] == "'" and value[-1] == "'")
+            )
         ):
             value = value[1:-1]
         elif isinstance(value, str):

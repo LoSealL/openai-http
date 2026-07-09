@@ -161,8 +161,7 @@ def validate_model_list(raw: Any) -> list[ModelInfo]:
     if not isinstance(raw, list):
         raise OpenAIError(
             message=(
-                f"Backend list_models must return a list, "
-                f"got {type(raw).__name__}"
+                f"Backend list_models must return a list, got {type(raw).__name__}"
             ),
             error_type="server_error",
             code="backend_contract_error",

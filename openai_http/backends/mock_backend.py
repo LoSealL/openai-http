@@ -146,8 +146,8 @@ class MockTransformersBackend(BackendBase):
         think_end = text.rfind("</think>")
         if think_start == -1 or think_end == -1 or think_end <= think_start:
             return None, text
-        reasoning = text[think_start + 7:think_end]
-        content = text[think_end + 8:].lstrip("\n")
+        reasoning = text[think_start + 7 : think_end]
+        content = text[think_end + 8 :].lstrip("\n")
         return reasoning, content
 
     @staticmethod
@@ -254,15 +254,13 @@ class MockTransformersBackend(BackendBase):
                 generated_text = generated_text[:content_budget]
         else:
             if finish_reason == "length":
-                generated_text = full_text[:max_tokens * 4]
+                generated_text = full_text[: max_tokens * 4]
             else:
                 generated_text = full_text
 
         emitted = (reasoning_content or "") + (generated_text or "")
         if emitted:
-            completion_tokens = min(
-                self._estimate_tokens(emitted), max_tokens
-            )
+            completion_tokens = min(self._estimate_tokens(emitted), max_tokens)
         else:
             completion_tokens = 0
 
@@ -298,7 +296,11 @@ class MockTransformersBackend(BackendBase):
             return {
                 "generated_text": None,
                 "finish_reason": "stop",
-                "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10},
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 0,
+                    "total_tokens": 10,
+                },
             }
 
         selected = candidates[0]
@@ -308,7 +310,9 @@ class MockTransformersBackend(BackendBase):
         props = params.get("properties", {})
         fake_args = {k: "mock_value" for k in props}
 
-        prompt_tok = sum(max(1, int(len(str(m.get("content", ""))) * 0.25)) for m in messages)
+        prompt_tok = sum(
+            max(1, int(len(str(m.get("content", ""))) * 0.25)) for m in messages
+        )
         comp_tok = max(1, int(len(json.dumps(fake_args)) * 0.25))
         return {
             "generated_text": None,

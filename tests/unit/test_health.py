@@ -20,7 +20,13 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from openai_http.app import create_app
-from openai_http.config import Settings, AuthSettings, ServerSettings, QueueSettings, ObservabilitySettings
+from openai_http.config import (
+    Settings,
+    AuthSettings,
+    ServerSettings,
+    QueueSettings,
+    ObservabilitySettings,
+)
 from openai_http.backends.base import BackendBase
 
 
@@ -28,7 +34,10 @@ class _HealthyBackend(BackendBase):
     """A backend that exposes custom health and metrics."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -52,7 +61,10 @@ class _NoMetricsBackend(BackendBase):
     """A backend without metrics support."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -70,7 +82,10 @@ class _BadHealthBackend(BackendBase):
     """A backend with misbehaving health()."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -91,7 +106,10 @@ class _FailingHealthBackend(BackendBase):
     """A backend whose health check raises unexpectedly."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -112,7 +130,10 @@ class _UnhealthyBackend(BackendBase):
     """A backend that reports itself as not ready."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -133,7 +154,10 @@ class _NonDictMetricsBackend(BackendBase):
     """A backend that returns non-dict metrics."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -157,7 +181,9 @@ async def healthy_client():
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(log_level="debug", log_format="text", metrics_enabled=False),
+        observability=ObservabilitySettings(
+            log_level="debug", log_format="text", metrics_enabled=False
+        ),
     )
     backend = _HealthyBackend()
     app = create_app(config=settings, backend=backend)
@@ -174,7 +200,9 @@ async def no_metrics_client():
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(log_level="debug", log_format="text", metrics_enabled=False),
+        observability=ObservabilitySettings(
+            log_level="debug", log_format="text", metrics_enabled=False
+        ),
     )
     backend = _NoMetricsBackend()
     app = create_app(config=settings, backend=backend)
@@ -189,7 +217,9 @@ def _make_client(backend):
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(log_level="debug", log_format="text", metrics_enabled=False),
+        observability=ObservabilitySettings(
+            log_level="debug", log_format="text", metrics_enabled=False
+        ),
     )
     app = create_app(config=settings, backend=backend)
     return app

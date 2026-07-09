@@ -65,7 +65,7 @@ def validate_chat_completion(response: Dict[str, Any]) -> bool:
         return False
     if not isinstance(response["choices"], list) or len(response["choices"]) == 0:
         return False
-    
+
     for choice in response["choices"]:
         if not {"index", "message", "finish_reason"}.issubset(choice.keys()):
             return False
@@ -74,10 +74,10 @@ def validate_chat_completion(response: Dict[str, Any]) -> bool:
             return False
         if message.get("role") != "assistant":
             return False
-    
+
     if not validate_usage(response["usage"]):
         return False
-    
+
     return True
 
 
@@ -90,14 +90,14 @@ def validate_chat_completion_chunk(chunk: Dict[str, Any]) -> bool:
         return False
     if not isinstance(chunk["choices"], list) or len(chunk["choices"]) == 0:
         return False
-    
+
     for choice in chunk["choices"]:
         if not {"index", "delta", "finish_reason"}.issubset(choice.keys()):
             return False
         delta = choice["delta"]
         if not isinstance(delta, dict):
             return False
-    
+
     return True
 
 
@@ -112,14 +112,14 @@ def validate_completion(response: Dict[str, Any]) -> bool:
         return False
     if not isinstance(response["choices"], list) or len(response["choices"]) == 0:
         return False
-    
+
     for choice in response["choices"]:
         if not {"index", "text", "finish_reason"}.issubset(choice.keys()):
             return False
-    
+
     if not validate_usage(response["usage"]):
         return False
-    
+
     return True
 
 
@@ -148,18 +148,20 @@ def validate_embedding_list(response: Dict[str, Any]) -> bool:
         return False
     if "usage" not in response:
         return False
-    
+
     for embedding in response["data"]:
         if not validate_embedding(embedding):
             return False
-    
+
     if not validate_usage(response["usage"]):
         return False
-    
+
     return True
 
 
-def validate_error_response(response: Dict[str, Any], expected_status: int = None) -> bool:
+def validate_error_response(
+    response: Dict[str, Any], expected_status: int = None
+) -> bool:
     """Validate Error object schema."""
     if "error" not in response:
         return False

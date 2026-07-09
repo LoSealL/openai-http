@@ -26,7 +26,10 @@ class _ValidBackend(BackendBase):
     """A backend that conforms to the full BackendBase protocol."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -71,7 +74,10 @@ class _SyncStreamBackend(BackendBase):
     """A backend with a sync generate_stream instead of async."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -94,7 +100,10 @@ class _MissingKeyModelsBackend(BackendBase):
     """A backend returning model dicts missing required key 'owned_by'."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"

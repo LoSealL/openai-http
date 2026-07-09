@@ -22,20 +22,27 @@ For SDK tests, we need a sync OpenAI client connected to a running server.
 Uses threading-based uvicorn startup (more reliable on Windows than subprocess).
 """
 
-import pytest
-import threading
-import time
 import os
 import socket
+import threading
+import time
+
 import httpx
+import pytest
 import uvicorn
-from openai import OpenAI, AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
+
 from openai_http.app import create_app
 from openai_http.config import Settings
 
 TEST_HOST = "127.0.0.1"
-TEST_PORT = 8000
-TEST_BASE_URL = f"http://{TEST_HOST}:{TEST_PORT}/v1"
+
+
+def _free_port(host: str) -> int:
+    """Find an available TCP port on the given host."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        return s.getsockname()[1]
 
 
 def _wait_for_server(host: str, port: int, timeout: float = 15.0) -> bool:
@@ -52,8 +59,8 @@ def _wait_for_server(host: str, port: int, timeout: float = 15.0) -> bool:
     return False
 
 
-def _start_server_thread():
-    """Start uvicorn server in a daemon thread."""
+def _start_server_thread(host: str, port: int):
+    """Start uvicorn server in a daemon thread on the given host:port."""
     os.environ["OPENAI_HTTP__AUTH__ENABLED"] = "false"
     os.environ["OPENAI_HTTP__OBSERVABILITY__LOG_LEVEL"] = "warning"
     os.environ["OPENAI_HTTP__OBSERVABILITY__LOG_FORMAT"] = "text"
@@ -64,8 +71,8 @@ def _start_server_thread():
 
     config = uvicorn.Config(
         app,
-        host=TEST_HOST,
-        port=TEST_PORT,
+        host=host,
+        port=port,
         log_level="warning",
         access_log=False,
     )
@@ -79,39 +86,28 @@ def _start_server_thread():
 
 @pytest.fixture(scope="session")
 def sdk_server():
-    """Start the mock server for SDK tests."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = s.connect_ex((TEST_HOST, TEST_PORT))
-        s.close()
-        if result == 0:
-            if _wait_for_server(TEST_HOST, TEST_PORT, timeout=2.0):
-                yield {
-                    "host": TEST_HOST,
-                    "port": TEST_PORT,
-                    "base_url": TEST_BASE_URL,
-                    "server": None,
-                }
-                return
-            else:
-                pytest.skip(f"Port {TEST_PORT} is occupied by another service")
-    except Exception:
-        pass
+    """Start the mock server for SDK tests on a random free port."""
+    max_retries = 5
 
-    server, thread = _start_server_thread()
+    for _ in range(max_retries):
+        port = _free_port(TEST_HOST)
+        server, thread = _start_server_thread(TEST_HOST, port)
 
-    if not _wait_for_server(TEST_HOST, TEST_PORT):
+        if _wait_for_server(TEST_HOST, port):
+            yield {
+                "host": TEST_HOST,
+                "port": port,
+                "base_url": f"http://{TEST_HOST}:{port}/v1",
+                "server": server,
+            }
+            server.should_exit = True
+            return
+
         server.should_exit = True
-        pytest.fail(f"Test server failed to start on {TEST_HOST}:{TEST_PORT}")
 
-    yield {
-        "host": TEST_HOST,
-        "port": TEST_PORT,
-        "base_url": TEST_BASE_URL,
-        "server": server,
-    }
-
-    server.should_exit = True
+    pytest.fail(
+        f"Test server failed to start on {TEST_HOST} after {max_retries} attempts"
+    )
 
 
 @pytest.fixture
