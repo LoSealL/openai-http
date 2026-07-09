@@ -420,3 +420,23 @@ class MockTransformersBackend(BackendBase):
             if model["id"] == model_id:
                 return model
         return None
+
+    async def metrics(self) -> dict:
+        """Return mock metrics.
+
+        Returns:
+            A small set of fake operational statistics.
+        """
+        return {
+            "requests_total": 0,
+            "generations_total": 0,
+            "embeddings_total": 0,
+        }
+
+    async def health(self) -> dict:
+        """Return mock backend health details.
+
+        Returns:
+            A status dict overlaid on the base health response.
+        """
+        return {"backend": "mock", "healthy": True}
