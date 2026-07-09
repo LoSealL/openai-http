@@ -173,7 +173,9 @@ class Choice(BaseModel):
     index: int
     message: ChoiceMessage
     logprobs: Optional[Any] = None
-    finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None
+    finish_reason: Optional[
+        Literal["stop", "length", "tool_calls", "content_filter"]
+    ] = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -229,7 +231,9 @@ class ChunkChoice(BaseModel):
     index: int
     delta: DeltaMessage
     logprobs: Optional[Any] = None
-    finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None
+    finish_reason: Optional[
+        Literal["stop", "length", "tool_calls", "content_filter"]
+    ] = None
 
 
 class ChatCompletionChunk(BaseModel):

@@ -25,7 +25,10 @@ class _CompleteBackend(BackendBase):
     """A backend implementing all required abstract methods."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -67,7 +70,6 @@ async def test_default_embed_raises_not_implemented():
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_setup_noop():
     """The default setup() is a no-op and does not raise."""
     b = _CompleteBackend()
@@ -79,3 +81,19 @@ async def test_teardown_noop():
     """The default teardown() is a no-op and does not raise."""
     b = _CompleteBackend()
     await b.teardown()
+
+
+@pytest.mark.asyncio
+async def test_default_metrics_raises_not_implemented():
+    """The default metrics() raises NotImplementedError."""
+    b = _CompleteBackend()
+    with pytest.raises(NotImplementedError):
+        await b.metrics()
+
+
+@pytest.mark.asyncio
+async def test_default_health_raises_not_implemented():
+    """The default health() raises NotImplementedError."""
+    b = _CompleteBackend()
+    with pytest.raises(NotImplementedError):
+        await b.health()

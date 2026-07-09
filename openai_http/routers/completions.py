@@ -125,7 +125,11 @@ async def create_completion(
                 async with queue.acquire():
                     for idx in range(n):
                         yield _make_chunk(
-                            request_id, body.model, created, idx, text="",
+                            request_id,
+                            body.model,
+                            created,
+                            idx,
+                            text="",
                         )
 
                         stream_finish_reason: _LegacyFinish = "stop"
@@ -147,12 +151,18 @@ async def create_completion(
                             else:
                                 chunk_text = chunk
                             yield _make_chunk(
-                                request_id, body.model, created, idx,
+                                request_id,
+                                body.model,
+                                created,
+                                idx,
                                 text=chunk_text,
                             )
 
                         yield _make_chunk(
-                            request_id, body.model, created, idx,
+                            request_id,
+                            body.model,
+                            created,
+                            idx,
                             text="",
                             finish_reason=stream_finish_reason,
                         )

@@ -20,7 +20,13 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from openai_http.app import create_app
-from openai_http.config import Settings, AuthSettings, ServerSettings, QueueSettings, ObservabilitySettings
+from openai_http.config import (
+    Settings,
+    AuthSettings,
+    ServerSettings,
+    QueueSettings,
+    ObservabilitySettings,
+)
 from openai_http.backends.mock_backend import MockTransformersBackend
 
 
@@ -31,7 +37,9 @@ def mock_config():
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(log_level="debug", log_format="text", metrics_enabled=False),
+        observability=ObservabilitySettings(
+            log_level="debug", log_format="text", metrics_enabled=False
+        ),
     )
 
 

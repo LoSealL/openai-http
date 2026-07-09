@@ -94,7 +94,7 @@ class CpmParser(ParserBase):
         if idx == -1:
             return ReasoningResult(reasoning=None, content=model_output)
         reasoning = model_output[:idx]
-        content = model_output[idx + len(self.REASONING_END_MARKER):].lstrip("\n")
+        content = model_output[idx + len(self.REASONING_END_MARKER) :].lstrip("\n")
         return ReasoningResult(reasoning=(reasoning or None), content=content)
 
     def parse_tool_calls(self, model_output: str) -> ToolCallResult:

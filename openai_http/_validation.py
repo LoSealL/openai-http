@@ -81,9 +81,7 @@ async def validate_backend(backend: BackendBase) -> None:
             f"get_model must return dict or None, got {type(model_info).__name__}"
         )
 
-    result = await backend.generate(
-        [{"role": "user", "content": "validation probe"}]
-    )
+    result = await backend.generate([{"role": "user", "content": "validation probe"}])
     if not isinstance(result, dict):
         raise BackendValidationError(
             f"generate must return a dict, got {type(result).__name__}"
@@ -100,6 +98,4 @@ async def validate_backend(backend: BackendBase) -> None:
         )
     for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
         if key not in usage:
-            raise BackendValidationError(
-                f"generate usage dict must contain '{key}'"
-            )
+            raise BackendValidationError(f"generate usage dict must contain '{key}'")

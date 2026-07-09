@@ -20,7 +20,13 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from openai_http.app import create_app
-from openai_http.config import Settings, AuthSettings, ServerSettings, QueueSettings, ObservabilitySettings
+from openai_http.config import (
+    Settings,
+    AuthSettings,
+    ServerSettings,
+    QueueSettings,
+    ObservabilitySettings,
+)
 from openai_http.backends.base import BackendBase
 
 
@@ -28,7 +34,10 @@ class _NoEmbedBackend(BackendBase):
     """A backend that does not implement embeddings."""
 
     async def generate(self, prompt, **kwargs):
-        return {"generated_text": "ok", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+        return {
+            "generated_text": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
     async def generate_stream(self, prompt, **kwargs):
         yield "ok"
@@ -49,7 +58,9 @@ async def no_embed_client():
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(log_level="debug", log_format="text", metrics_enabled=False),
+        observability=ObservabilitySettings(
+            log_level="debug", log_format="text", metrics_enabled=False
+        ),
     )
     backend = _NoEmbedBackend()
     app = create_app(config=settings, backend=backend)

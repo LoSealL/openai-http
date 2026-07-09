@@ -23,9 +23,7 @@ from typing import Dict, List, Any
 
 def simple_chat_messages() -> List[Dict[str, str]]:
     """Generate simple chat messages for testing."""
-    return [
-        {"role": "user", "content": "Hello, how are you?"}
-    ]
+    return [{"role": "user", "content": "Hello, how are you?"}]
 
 
 def multi_turn_chat_messages() -> List[Dict[str, str]]:
@@ -34,7 +32,7 @@ def multi_turn_chat_messages() -> List[Dict[str, str]]:
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What is 2+2?"},
         {"role": "assistant", "content": "2+2 equals 4."},
-        {"role": "user", "content": "And what is 3+3?"}
+        {"role": "user", "content": "And what is 3+3?"},
     ]
 
 
@@ -45,11 +43,7 @@ def long_prompt() -> str:
 
 def batch_prompts() -> List[str]:
     """Generate batch prompts for testing."""
-    return [
-        "What is AI?",
-        "Explain machine learning",
-        "Define neural network"
-    ]
+    return ["What is AI?", "Explain machine learning", "Define neural network"]
 
 
 def embedding_texts() -> List[str]:
@@ -57,7 +51,7 @@ def embedding_texts() -> List[str]:
     return [
         "The quick brown fox jumps over the lazy dog",
         "Machine learning is fascinating",
-        "OpenAI creates amazing tools"
+        "OpenAI creates amazing tools",
     ]
 
 
@@ -72,14 +66,11 @@ def function_definitions() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "City name"
-                        }
+                        "location": {"type": "string", "description": "City name"}
                     },
-                    "required": ["location"]
-                }
-            }
+                    "required": ["location"],
+                },
+            },
         }
     ]
 
@@ -99,6 +90,6 @@ def mock_jsonl_content() -> str:
     lines = [
         '{"prompt": "What is AI?", "completion": "AI is artificial intelligence"}',
         '{"prompt": "Define ML", "completion": "ML is machine learning"}',
-        '{"prompt": "Explain NN", "completion": "NN is neural network"}'
+        '{"prompt": "Explain NN", "completion": "NN is neural network"}',
     ]
     return "\n".join(lines)

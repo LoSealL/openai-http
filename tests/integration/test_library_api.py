@@ -120,7 +120,9 @@ def _run_server_thread(backend, port, result):
 def _start(backend, port):
     """Start the server on a background thread and wait for it to become available."""
     result = _RunResult()
-    t = threading.Thread(target=_run_server_thread, args=(backend, port, result), daemon=True)
+    t = threading.Thread(
+        target=_run_server_thread, args=(backend, port, result), daemon=True
+    )
     t.start()
     ok = _wait_for_server(port)
     if not ok:

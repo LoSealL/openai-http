@@ -149,7 +149,9 @@ async def chat_completions(
             try:
                 async with queue.acquire():
                     yield _make_chunk(
-                        request_id, body.model, created,
+                        request_id,
+                        body.model,
+                        created,
                         delta=DeltaMessage(role="assistant"),
                     )
 
@@ -169,20 +171,23 @@ async def chat_completions(
                         else:
                             delta = DeltaMessage(content=chunk)
                         yield _make_chunk(
-                            request_id, body.model, created, delta=delta,
+                            request_id,
+                            body.model,
+                            created,
+                            delta=delta,
                         )
 
                     final_usage: UsageInfo | None = None
-                    if body.stream_options and body.stream_options.get(
-                        "include_usage"
-                    ):
+                    if body.stream_options and body.stream_options.get("include_usage"):
                         final_usage = UsageInfo(
                             prompt_tokens=0,
                             completion_tokens=0,
                             total_tokens=0,
                         )
                     yield _make_chunk(
-                        request_id, body.model, created,
+                        request_id,
+                        body.model,
+                        created,
                         delta=DeltaMessage(),
                         finish_reason=stream_finish_reason,
                         usage=final_usage,
@@ -222,9 +227,7 @@ async def chat_completions(
         content=result.generated_text,
         reasoning_content=result.reasoning_content,
         tool_calls=(
-            _to_response_tool_calls(result.tool_calls)
-            if result.tool_calls
-            else None
+            _to_response_tool_calls(result.tool_calls) if result.tool_calls else None
         ),
     )
 
@@ -270,7 +273,8 @@ def _make_chunk(
     model: str,
     created: int,
     delta: DeltaMessage,
-    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] | None = None,
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"]
+    | None = None,
     usage: UsageInfo | None = None,
 ) -> str:
     """Build an SSE-formatted chat completion chunk.

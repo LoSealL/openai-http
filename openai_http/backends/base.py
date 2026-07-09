@@ -163,3 +163,31 @@ class BackendBase(abc.ABC):
         Called once at server shutdown. Override to release models,
         close connections, etc.
         """
+
+    async def metrics(self) -> dict:
+        """Return backend-specific metrics and statistics.
+
+        Called for ``GET /metrics``. Override to expose counters,
+        latency histograms, or other operational statistics.
+
+        Returns:
+            A mapping of metric names to values.
+
+        Raises:
+            NotImplementedError: If metrics are not supported.
+        """
+        raise NotImplementedError("Metrics are not supported by this backend")
+
+    async def health(self) -> dict:
+        """Return backend-specific health status.
+
+        Called for ``GET /health`` and merged into the base health
+        response, allowing backends to overlay custom status fields.
+
+        Returns:
+            A mapping of health field names to values.
+
+        Raises:
+            NotImplementedError: If health details are not supported.
+        """
+        raise NotImplementedError("Health details are not supported by this backend")

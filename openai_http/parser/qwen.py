@@ -46,9 +46,7 @@ REASONING_END_MARKER = "</think>"
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 _AGENT_FC_RE = re.compile(r"<function=(.*?)>(.*?)</function>", re.DOTALL)
-_AGENT_PARAM_RE = re.compile(
-    r"<parameter=(.*?)>\s*(.*?)\s*</parameter>", re.DOTALL
-)
+_AGENT_PARAM_RE = re.compile(r"<parameter=(.*?)>\s*(.*?)\s*</parameter>", re.DOTALL)
 
 
 class QwenParser(ParserBase):
@@ -71,7 +69,7 @@ class QwenParser(ParserBase):
         if idx == -1:
             return ReasoningResult(reasoning=None, content=model_output)
         reasoning = model_output[:idx]
-        content = model_output[idx + len(self.REASONING_END_MARKER):].lstrip("\n")
+        content = model_output[idx + len(self.REASONING_END_MARKER) :].lstrip("\n")
         return ReasoningResult(reasoning=(reasoning or None), content=content)
 
     def parse_tool_calls(self, model_output: str) -> ToolCallResult:

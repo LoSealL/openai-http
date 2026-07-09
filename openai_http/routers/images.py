@@ -54,4 +54,6 @@ async def create_image_variations() -> None:
     Raises:
         NotImplementedOpenAIError: Always, as this backend does not support image variations.
     """
-    raise NotImplementedOpenAIError("Image variations are not supported by this backend")
+    raise NotImplementedOpenAIError(
+        "Image variations are not supported by this backend"
+    )

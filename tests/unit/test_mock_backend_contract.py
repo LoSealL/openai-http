@@ -54,9 +54,7 @@ async def test_generate_truncated_output_passes_schema():
 async def test_generate_stream_chunks_pass_schema(thinking):
     backend = MockTransformersBackend(thinking=thinking)
     saw_content = False
-    async for raw in backend.generate_stream(
-        "hello", max_tokens=64, temperature=0.0
-    ):
+    async for raw in backend.generate_stream("hello", max_tokens=64, temperature=0.0):
         chunk = validate_stream_chunk(raw)
         if not isinstance(chunk, FinishChunk):
             saw_content = True
