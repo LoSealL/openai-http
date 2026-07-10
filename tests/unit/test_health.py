@@ -1,21 +1,3 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Tests for health and metrics endpoints.
-"""
-
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -27,28 +9,12 @@ from openai_http.config import (
     QueueSettings,
     ObservabilitySettings,
 )
-from openai_http.backends.base import BackendBase
+from tests._backend_fixtures import _MockBackendBase
 
 
-class _HealthyBackend(BackendBase):
-    """A backend that exposes custom health and metrics."""
-
-    async def generate(self, prompt, **kwargs):
-        return {
-            "generated_text": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-
-    async def generate_stream(self, prompt, **kwargs):
-        yield "ok"
-
+class _HealthyBackend(_MockBackendBase):
     async def list_models(self):
         return [{"id": "m", "object": "model", "created": 0, "owned_by": "me"}]
-
-    async def get_model(self, model_id):
-        if model_id == "m":
-            return (await self.list_models())[0]
-        return None
 
     async def metrics(self):
         return {"requests_total": 42}
@@ -57,211 +23,90 @@ class _HealthyBackend(BackendBase):
         return {"custom_field": "ok", "status": "ready"}
 
 
-class _NoMetricsBackend(BackendBase):
-    """A backend without metrics support."""
-
-    async def generate(self, prompt, **kwargs):
-        return {
-            "generated_text": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-
-    async def generate_stream(self, prompt, **kwargs):
-        yield "ok"
-
-    async def list_models(self):
-        return [{"id": "m", "object": "model", "created": 0, "owned_by": "me"}]
-
-    async def get_model(self, model_id):
-        if model_id == "m":
-            return (await self.list_models())[0]
-        return None
+class _NoMetricsBackend(_MockBackendBase):
+    pass
 
 
-class _BadHealthBackend(BackendBase):
-    """A backend with misbehaving health()."""
-
-    async def generate(self, prompt, **kwargs):
-        return {
-            "generated_text": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-
-    async def generate_stream(self, prompt, **kwargs):
-        yield "ok"
-
-    async def list_models(self):
-        return [{"id": "m", "object": "model", "created": 0, "owned_by": "me"}]
-
-    async def get_model(self, model_id):
-        if model_id == "m":
-            return (await self.list_models())[0]
-        return None
-
+class _BadHealthBackend(_MockBackendBase):
     async def health(self):
         return "not a dict"
 
 
-class _FailingHealthBackend(BackendBase):
-    """A backend whose health check raises unexpectedly."""
-
-    async def generate(self, prompt, **kwargs):
-        return {
-            "generated_text": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-
-    async def generate_stream(self, prompt, **kwargs):
-        yield "ok"
-
-    async def list_models(self):
-        return [{"id": "m", "object": "model", "created": 0, "owned_by": "me"}]
-
-    async def get_model(self, model_id):
-        if model_id == "m":
-            return (await self.list_models())[0]
-        return None
-
+class _FailingHealthBackend(_MockBackendBase):
     async def health(self):
         raise RuntimeError("health probe failed")
 
 
-class _UnhealthyBackend(BackendBase):
-    """A backend that reports itself as not ready."""
-
-    async def generate(self, prompt, **kwargs):
-        return {
-            "generated_text": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-
-    async def generate_stream(self, prompt, **kwargs):
-        yield "ok"
-
-    async def list_models(self):
-        return [{"id": "m", "object": "model", "created": 0, "owned_by": "me"}]
-
-    async def get_model(self, model_id):
-        if model_id == "m":
-            return (await self.list_models())[0]
-        return None
-
+class _UnhealthyBackend(_MockBackendBase):
     async def health(self):
         return {"status": "not_ready", "reason": "overload"}
 
 
-class _NonDictMetricsBackend(BackendBase):
-    """A backend that returns non-dict metrics."""
-
-    async def generate(self, prompt, **kwargs):
-        return {
-            "generated_text": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-
-    async def generate_stream(self, prompt, **kwargs):
-        yield "ok"
-
-    async def list_models(self):
-        return [{"id": "m", "object": "model", "created": 0, "owned_by": "me"}]
-
-    async def get_model(self, model_id):
-        if model_id == "m":
-            return (await self.list_models())[0]
-        return None
-
+class _NonDictMetricsBackend(_MockBackendBase):
     async def metrics(self):
         return [1, 2, 3]
 
 
-@pytest.fixture
-async def healthy_client():
-    """Fixture providing an async test client with HealthyBackend."""
-    settings = Settings(
+def _settings() -> Settings:
+    return Settings(
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
         observability=ObservabilitySettings(
-            log_level="debug", log_format="text", metrics_enabled=False
+            log_level="debug", log_format="text"
         ),
     )
-    backend = _HealthyBackend()
-    app = create_app(config=settings, backend=backend)
+
+
+def _make_app(backend):
+    return create_app(config=_settings(), backend=backend)
+
+
+@pytest.fixture
+async def healthy_client():
+    app = _make_app(_HealthyBackend())
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
 
 
 @pytest.fixture
 async def no_metrics_client():
-    """Fixture providing an async test client with NoMetricsBackend."""
-    settings = Settings(
-        server=ServerSettings(host="127.0.0.1", port=8000),
-        auth=AuthSettings(enabled=False, api_keys=[]),
-        queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(
-            log_level="debug", log_format="text", metrics_enabled=False
-        ),
-    )
-    backend = _NoMetricsBackend()
-    app = create_app(config=settings, backend=backend)
+    app = _make_app(_NoMetricsBackend())
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
-
-
-def _make_client(backend):
-    settings = Settings(
-        server=ServerSettings(host="127.0.0.1", port=8000),
-        auth=AuthSettings(enabled=False, api_keys=[]),
-        queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(
-            log_level="debug", log_format="text", metrics_enabled=False
-        ),
-    )
-    app = create_app(config=settings, backend=backend)
-    return app
 
 
 @pytest.fixture
 async def bad_health_client():
-    """Fixture with a backend that returns non-dict health."""
-    app = _make_client(_BadHealthBackend())
+    app = _make_app(_BadHealthBackend())
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
 
 
 @pytest.fixture
 async def failing_health_client():
-    """Fixture with a backend that raises from health()."""
-    app = _make_client(_FailingHealthBackend())
+    app = _make_app(_FailingHealthBackend())
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
 
 
 @pytest.fixture
 async def unhealthy_client():
-    """Fixture with a backend that reports status not_ready."""
-    app = _make_client(_UnhealthyBackend())
+    app = _make_app(_UnhealthyBackend())
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
 
 
 @pytest.fixture
 async def non_dict_metrics_client():
-    """Fixture with a backend that returns non-dict metrics."""
-    app = _make_client(_NonDictMetricsBackend())
+    app = _make_app(_NonDictMetricsBackend())
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
 
 
@@ -296,13 +141,13 @@ async def test_health_becomes_503_when_backend_reports_not_ready(unhealthy_clien
 
 
 @pytest.mark.asyncio
-async def test_metrics_wraps_non_dict_metrics(non_dict_metrics_client):
-    """GET /metrics wraps non-dict backend metrics in a data field."""
+async def test_metrics_passes_through_non_dict_metrics(non_dict_metrics_client):
+    """GET /metrics passes non-dict backend metrics as-is."""
     resp = await non_dict_metrics_client.get("/metrics")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["metrics"]["data"] == [1, 2, 3]
+    assert body["metrics"] == [1, 2, 3]
 
 
 @pytest.mark.asyncio

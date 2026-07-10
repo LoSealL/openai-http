@@ -26,7 +26,7 @@ Usage:
 
 import tomllib
 from pathlib import Path
-from typing import Optional
+from typing import Self
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -64,14 +64,10 @@ class ObservabilitySettings(BaseSettings):
             ``"warning"``, ``"error"``, ``"critical"``).
         log_format: Output format — ``"json"`` for structured JSON or
             ``"text"`` for plain text logs.
-        metrics_enabled: Whether to expose Prometheus metrics.
-        metrics_port: Port for the metrics HTTP endpoint.
     """
 
     log_level: str = "info"
     log_format: str = "json"
-    metrics_enabled: bool = True
-    metrics_port: int = 9464
 
 
 class Settings(BaseSettings):
@@ -102,8 +98,10 @@ class Settings(BaseSettings):
     queue: QueueSettings = QueueSettings()
     observability: ObservabilitySettings = ObservabilitySettings()
 
+    _singleton: Self | None = None
+
     @classmethod
-    def from_toml(cls, config_path: str = "config.toml") -> "Settings":
+    def from_toml(cls, config_path: str = "config.toml") -> Self:
         """
         Load settings from TOML file with environment variable override.
 
@@ -123,8 +121,28 @@ class Settings(BaseSettings):
 
         return cls(**toml_data)
 
+    @classmethod
+    def get_settings(cls, config_path: str = "config.toml") -> Self:
+        """
+        Get application settings (singleton).
 
-_settings: Optional[Settings] = None
+        Loads from TOML file + environment variables on first call,
+        returns cached instance on subsequent calls.
+
+        Args:
+            config_path: Path to TOML config file
+
+        Returns:
+            Settings instance
+        """
+        if cls._singleton is None:
+            cls._singleton = cls.from_toml(config_path)
+        return cls._singleton
+
+    @classmethod
+    def reset_settings(cls) -> None:
+        """Reset settings cache (useful for testing)."""
+        cls._singleton = None
 
 
 def get_settings(config_path: str = "config.toml") -> Settings:
@@ -140,13 +158,9 @@ def get_settings(config_path: str = "config.toml") -> Settings:
     Returns:
         Settings instance
     """
-    global _settings
-    if _settings is None:
-        _settings = Settings.from_toml(config_path)
-    return _settings
+    return Settings.get_settings(config_path)
 
 
 def reset_settings() -> None:
     """Reset settings cache (useful for testing)."""
-    global _settings
-    _settings = None
+    Settings.reset_settings()

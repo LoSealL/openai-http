@@ -19,12 +19,12 @@ Provides FastAPI dependency for ``Authorization: Bearer <token>`` validation.
 Supports open mode (auth disabled) and multi-key validation.
 """
 
-from typing import Callable, Optional
+from typing import Optional
 
 from fastapi import Request, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from openai_http.errors import AuthenticationError
+from .errors import AuthenticationError
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -66,52 +66,3 @@ async def verify_api_key(
         )
 
     return token
-
-
-def create_verify_api_key(config) -> Callable:
-    """Create a config-scoped API key verification dependency.
-
-    Unlike ``verify_api_key`` which reads config from ``request.app.state``,
-    this version captures *config* at creation time.
-
-    Args:
-        config: A settings object with an ``auth`` attribute containing
-            ``enabled`` and ``api_keys``.
-
-    Returns:
-        An async callable suitable for use as a FastAPI dependency.
-    """
-
-    async def _verify(
-        credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
-    ) -> Optional[str]:
-        """Verify the API key using the captured config.
-
-        Args:
-            credentials: Bearer token credentials.
-
-        Returns:
-            The validated API token, or None if auth is disabled.
-
-        Raises:
-            AuthenticationError: If the token is missing or invalid.
-        """
-        if not config.auth.enabled:
-            return None
-
-        if credentials is None:
-            raise AuthenticationError(
-                message="You must provide an API key.",
-                code="missing_api_key",
-            )
-
-        token = credentials.credentials
-        if not config.auth.api_keys or token not in config.auth.api_keys:
-            raise AuthenticationError(
-                message="Incorrect API key provided.",
-                code="invalid_api_key",
-            )
-
-        return token
-
-    return _verify

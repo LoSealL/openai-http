@@ -1,21 +1,7 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
+import socket
+import time
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Shared test fixtures.
-"""
-
+import httpx
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -30,6 +16,31 @@ from openai_http.config import (
 from openai_http.backends.mock_backend import MockTransformersBackend
 
 
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _wait_for_server(url: str, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            httpx.get(url, timeout=1.0).raise_for_status()
+            return
+        except Exception:
+            time.sleep(0.1)
+    raise RuntimeError(f"server at {url} did not start within {timeout}s")
+
+
+def _wrap_call(call, *, endpoint_skip: str = ""):
+    """Call a 501-stub endpoint; return the SDK exception or the response."""
+    try:
+        return call()
+    except Exception as e:
+        return e
+
+
 @pytest.fixture(scope="session")
 def mock_config():
     """Create test configuration with mock backend and auth disabled."""
@@ -38,7 +49,7 @@ def mock_config():
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
         observability=ObservabilitySettings(
-            log_level="debug", log_format="text", metrics_enabled=False
+            log_level="debug", log_format="text"
         ),
     )
 

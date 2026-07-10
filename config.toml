@@ -15,5 +15,3 @@ depth = 32  # Max requests in queue before returning 429
 [observability]
 log_level = "info"
 log_format = "json"  # "json" or "text"
-metrics_enabled = true
-metrics_port = 9464

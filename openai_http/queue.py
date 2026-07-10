@@ -15,38 +15,32 @@ limitations under the License.
 
 Request queue for concurrent request handling.
 
-Uses asyncio.Semaphore for GPU serialization and asyncio.Queue for FIFO bound.
+Uses asyncio.Queue for FIFO bound.
 Returns 429 when queue is full.
 """
 
 import asyncio
 from contextlib import asynccontextmanager
 
-from openai_http.errors import RateLimitError
+from .errors import RateLimitError
 
 
 class RequestQueue:
     """
-    Bounded FIFO request queue with GPU serialization.
+    Bounded FIFO request queue.
 
-    Only one request executes at a time (semaphore).
-    Additional requests wait in queue up to max depth.
+    Requests wait in queue up to max depth.
     Returns 429 Too Many Requests when queue is full.
     """
 
-    def __init__(self, max_depth: int = 32, retry_after: int = 5):
+    def __init__(self, max_depth: int = 32):
         """Initialize the request queue.
 
         Args:
             max_depth: Maximum number of requests allowed in the queue
                 before rejecting with 429.
-            retry_after: Suggested retry-after seconds sent with the
-                429 response.
         """
-        self.semaphore = asyncio.Semaphore(1)
         self.queue: asyncio.Queue[int] = asyncio.Queue(maxsize=max_depth)
-        self.active_count = 0
-        self.retry_after = retry_after
 
     @property
     def pending(self) -> int:
@@ -56,7 +50,7 @@ class RequestQueue:
     @asynccontextmanager
     async def acquire(self):
         """
-        Acquire queue slot and GPU access.
+        Acquire a queue slot.
 
         Raises RateLimitError if queue is full.
         """
@@ -68,11 +62,6 @@ class RequestQueue:
 
         await self.queue.put(1)
         try:
-            async with self.semaphore:
-                self.active_count += 1
-                try:
-                    yield
-                finally:
-                    self.active_count -= 1
+            yield
         finally:
             await self.queue.get()

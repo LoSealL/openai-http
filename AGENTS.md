@@ -37,7 +37,7 @@ Single-package service `openai_http/` with layered modules:
 - **`config.py`** — `pydantic-settings` `Settings` class. TOML (`config.toml`) + env vars with `OPENAI_HTTP__` prefix (e.g. `OPENAI_HTTP__SERVER__PORT=9000`). Env vars override TOML.
 - **`routers/`** — One file per API domain (`chat.py`, `models.py`, `health.py`). Register via `app.include_router()` in `app.py`.
 - **`schemas/`** — Pydantic v2 models. Request models use `ConfigDict(extra="allow")` to accept unknown OpenAI params.
-- **`backends/`** — `base.py` defines `Backend` Protocol. `mock_backend.py` for testing. Real transformers backend is Phase 6 (not yet implemented — `backend.type == "transformers"` raises `NotImplementedError`).
+- **`backends/`** — `base.py` defines `BackendBase` ABC. `mock_backend.py` for testing. Real transformers backend is Phase 6 (not yet implemented — `backend.type == "transformers"` raises `NotImplementedError`).
 - **`errors.py`** — `OpenAIError` exception hierarchy + global exception handlers returning `{"error": {message, type, param, code}}`. All errors must use this format.
 - **`queue.py`** — `RequestQueue` with `asyncio.Semaphore(1)` for GPU serialization. Use `async with queue.acquire()` in inference endpoints.
 - **`observability/`** — JSON logging + OpenTelemetry metrics.
@@ -52,17 +52,6 @@ Single-package service `openai_http/` with layered modules:
 
 ## Windows Quirks
 
-- `subprocess.DEVNULL` fails with `OSError [WinError 6]` in some pytest session-scoped fixture contexts. The SDK test conftest uses `threading` + `uvicorn.Server` instead.
 - Use `Select-Object -Last N` instead of `tail -n N` for PowerShell output piping.
 
-<!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan:
-
-**Plan**: `specs/002-extensible-backend-sdk/plan.md`
-**Spec**: `specs/002-extensible-backend-sdk/spec.md`
-**Research**: `specs/002-extensible-backend-sdk/research.md`
-**Data Model**: `specs/002-extensible-backend-sdk/data-model.md`
-**API Contract**: `specs/002-extensible-backend-sdk/contracts/python-api.md`
-**Quickstart**: `specs/002-extensible-backend-sdk/quickstart.md`
-<!-- SPECKIT END -->
+Read `specs/002-extensible-backend-sdk/plan.md` for context.

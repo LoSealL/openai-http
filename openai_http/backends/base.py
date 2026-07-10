@@ -26,7 +26,7 @@ HTTP 500 ``server_error`` with code ``backend_contract_error``.
 """
 
 import abc
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator
 
 
 class BackendBase(abc.ABC):
@@ -105,8 +105,6 @@ class BackendBase(abc.ABC):
             Text chunks or typed dicts.
         """
 
-        yield ""
-
     @abc.abstractmethod
     async def list_models(self) -> list[dict]:
         """List all available models.
@@ -119,7 +117,7 @@ class BackendBase(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def get_model(self, model_id: str) -> Optional[dict]:
+    async def get_model(self, model_id: str) -> dict | None:
         """Get details for a specific model.
 
         Args:
@@ -190,4 +188,4 @@ class BackendBase(abc.ABC):
         Raises:
             NotImplementedError: If health details are not supported.
         """
-        raise NotImplementedError("Health details are not supported by this backend")
+        raise NotImplementedError("health() not supported by this backend")

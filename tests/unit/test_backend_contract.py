@@ -1,25 +1,4 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Tests for the backend-facing typed contracts in ``backends.types`` and
-the router-side validation helpers in ``backends.contract``.
-"""
-
 import pytest
-from pydantic import ValidationError
-
 from openai_http.backends.contract import (
     validate_generation,
     validate_model_info,
@@ -70,14 +49,6 @@ class TestGenerationResultValidation:
         assert exc.value.status_code == 500
         assert exc.value.code == "backend_contract_error"
 
-    def test_extra_keys_rejected(self):
-        raw = {
-            "generated_text": "x",
-            "usage": VALID_USAGE,
-            "phantom_field": True,
-        }
-        with pytest.raises(OpenAIError):
-            validate_generation(raw)
 
     def test_pydantic_instance_passes_through(self):
         instance = GenerationResult(
@@ -158,10 +129,3 @@ class TestModelInfoValidation:
         with pytest.raises(OpenAIError):
             validate_model_list({"not": "a list"})
 
-
-def test_generation_result_strict_extra_forbidden():
-    """Sanity: GenerationResult schema rejects unknown keys."""
-    with pytest.raises(ValidationError):
-        GenerationResult.model_validate(
-            {"generated_text": "x", "usage": VALID_USAGE, "junk": 1}
-        )

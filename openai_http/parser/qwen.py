@@ -30,19 +30,18 @@ Tool-call formats (both accepted):
       <tool_call><function=f><parameter=x>1</parameter></function></tool_call>
 """
 
+# pylint:disable=duplicate-code  # R0801: tool-call assembly similar to lfm.py
+
 import json
 import re
 
-from openai_http.parser import register_parser
-from openai_http.parser.base import (
+from . import register_parser
+from .base import (
     ParserBase,
     ReasoningResult,
     ToolCallResult,
     make_tool_call,
 )
-
-REASONING_START_MARKER = "<think>"
-REASONING_END_MARKER = "</think>"
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 _AGENT_FC_RE = re.compile(r"<function=(.*?)>(.*?)</function>", re.DOTALL)
@@ -51,9 +50,6 @@ _AGENT_PARAM_RE = re.compile(r"<parameter=(.*?)>\s*(.*?)\s*</parameter>", re.DOT
 
 class QwenParser(ParserBase):
     """Parser for Qwen 3 / 3.5 reasoning and tool-call syntax."""
-
-    REASONING_START_MARKER = REASONING_START_MARKER
-    REASONING_END_MARKER = REASONING_END_MARKER
 
     def parse_reasoning(self, model_output: str) -> ReasoningResult:
         """Split reasoning from content on the first ``</think>`` marker.
@@ -65,11 +61,11 @@ class QwenParser(ParserBase):
             A :class:`ReasoningResult`; ``reasoning`` is ``None`` when
             no ``</think>`` marker is present.
         """
-        idx = model_output.find(self.REASONING_END_MARKER)
+        idx = model_output.find("</think>")
         if idx == -1:
             return ReasoningResult(reasoning=None, content=model_output)
         reasoning = model_output[:idx]
-        content = model_output[idx + len(self.REASONING_END_MARKER) :].lstrip("\n")
+        content = model_output[idx + 8 :].lstrip("\n")
         return ReasoningResult(reasoning=(reasoning or None), content=content)
 
     def parse_tool_calls(self, model_output: str) -> ToolCallResult:

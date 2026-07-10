@@ -1,29 +1,6 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Tests for OpenAI Batches API.
-
-Tests: client.batches.*
-
-NOTE: /v1/batches is P3 — skipped until implemented.
-Tests verify expected behavior once implemented.
-"""
-
 import pytest
 import io
-from .test_base import OpenAITestBase, MOCK_MODELS
+from .test_base import OpenAITestBase, MOCK_MODEL
 
 
 def _wrap_call(func):
@@ -44,11 +21,11 @@ class TestBatchesAPI(OpenAITestBase):
         batch_lines = [
             '{"custom_id": "req-1", "method": "POST", "url": "/v1/chat/completions", '
             '"body": {"model": "'
-            + MOCK_MODELS[0]
+            + MOCK_MODEL
             + '", "messages": [{"role": "user", "content": "Hello"}]}}',
             '{"custom_id": "req-2", "method": "POST", "url": "/v1/chat/completions", '
             '"body": {"model": "'
-            + MOCK_MODELS[0]
+            + MOCK_MODEL
             + '", "messages": [{"role": "user", "content": "Hi"}]}}',
         ]
         file_content = "\n".join(batch_lines)

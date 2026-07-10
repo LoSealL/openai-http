@@ -1,25 +1,3 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-End-to-end SSE schema validation.
-
-Streams every chunk emitted by /v1/chat/completions and /v1/completions
-through the wire-level Pydantic schemas to guard against regressions
-in ``_make_chunk``.
-"""
-
 import json
 
 import httpx
@@ -27,7 +5,7 @@ import pytest
 
 from openai_http.schemas.chat import ChatCompletionChunk
 from openai_http.schemas.completions import CompletionChunk
-from tests.sdk.test_base import DEFAULT_MODEL
+from tests.sdk.test_base import MOCK_MODEL
 
 
 def _iter_sse_events(text: str):
@@ -56,7 +34,7 @@ class TestChatCompletionsSSEContract:
                 "POST",
                 url,
                 json={
-                    "model": DEFAULT_MODEL,
+                    "model": MOCK_MODEL,
                     "messages": [{"role": "user", "content": "hi"}],
                     "stream": True,
                 },
@@ -81,7 +59,7 @@ class TestCompletionsSSEContract:
                 "POST",
                 url,
                 json={
-                    "model": DEFAULT_MODEL,
+                    "model": MOCK_MODEL,
                     "prompt": "hello",
                     "max_tokens": 16,
                     "stream": True,
@@ -103,13 +81,13 @@ def test_no_extra_fields_in_chunks(sdk_server, path):
     url = f"{sdk_server['base_url']}{path}"
     payload = (
         {
-            "model": DEFAULT_MODEL,
+            "model": MOCK_MODEL,
             "messages": [{"role": "user", "content": "hi"}],
             "stream": True,
         }
         if path == "/chat/completions"
         else {
-            "model": DEFAULT_MODEL,
+            "model": MOCK_MODEL,
             "prompt": "hi",
             "max_tokens": 8,
             "stream": True,

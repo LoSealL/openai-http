@@ -24,7 +24,7 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from openai_http.errors import NotImplementedOpenAIError
+from ..errors import NotImplementedOpenAIError
 
 
 logger = logging.getLogger(__name__)
@@ -112,9 +112,6 @@ async def metrics(request: Request) -> JSONResponse:
         backend_metrics = await backend.metrics()
     except NotImplementedError:
         raise NotImplementedOpenAIError("Metrics are not supported by this backend")
-
-    if not isinstance(backend_metrics, dict):
-        backend_metrics = {"data": backend_metrics}
 
     return JSONResponse(
         content={"status": "ok", "metrics": backend_metrics},

@@ -111,8 +111,6 @@ depth = 32  # max queued requests
 [observability]
 log_level = "info"
 log_format = "json"  # "json" or "text"
-metrics_enabled = true
-metrics_port = 9464
 ```
 
 ### Environment Variables
@@ -135,19 +133,6 @@ OPENAI_HTTP__AUTH__API_KEYS=["sk-test-key"]
 - `POST /v1/completions` — Text completion
 - `POST /v1/embeddings` — Text embeddings
 - `GET /health` — Health check
-
-### Stub endpoints (registered but return 501)
-
-- `POST /v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/audio/translations`
-- `POST /v1/images/generations`, `/v1/images/edits`, `/v1/images/variations`
-
-### Planned
-
-- Audio / image generation (currently return 501)
-- `POST /v1/moderations`
-- `POST /v1/files`, file management
-- `POST /v1/fine_tuning/jobs`
-- Batch API
 
 ## Development
 
@@ -227,43 +212,7 @@ specs/                 # Feature specs & plans
 
 ### Custom backends
 
-Create your own backend by subclassing `BackendBase` and plugging it into `run_server()`:
-
-```python
-import openai_http
-
-class MyBackend(openai_http.BackendBase):
-    async def generate(self, prompt, **kwargs):
-        return {"generated_text": "...", "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
-
-    async def generate_stream(self, prompt, **kwargs):
-        yield "Hello"
-        yield " world"
-
-    async def list_models(self):
-        return [{"id": "my-model", "object": "model", "created": 0, "owned_by": "me"}]
-
-    async def get_model(self, model_id):
-        return {"id": model_id, "object": "model", "created": 0, "owned_by": "me"} if model_id == "my-model" else None
-
-openai_http.run_server(MyBackend(), port=8000)
-```
-
-See `examples/transformers-backend/` for a full working implementation.
-
-### Built-in Backend Protocol
-
-All backends subclass `BackendBase` (defined in `backends/base.py`):
-
-| Method | Required | Purpose |
-|--------|----------|---------|
-| `generate()` | ✅ | Non-streaming completion |
-| `generate_stream()` | ✅ | Streaming completion (yields `str` chunks) |
-| `list_models()` | ✅ | List available models |
-| `get_model()` | ✅ | Get a model by ID |
-| `embed()` | ❌ | Embeddings (default → HTTP 501) |
-| `generate_tool_calls()` | ❌ | Tool/function calling (default → HTTP 501) |
-| `setup()` / `teardown()` | ❌ | Lifecycle hooks (default no-op) |
+See `.opencode/skills/custom-backend/SKILL.md` for a full example.
 
 ### Request Queue
 

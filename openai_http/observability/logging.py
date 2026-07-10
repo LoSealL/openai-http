@@ -47,34 +47,41 @@ class JSONFormatter(logging.Formatter):
             "message": record.getMessage(),
             "logger": record.name,
         }
-        if hasattr(record, "request_id"):
-            log_data["request_id"] = record.request_id
-        if hasattr(record, "extra_data"):
-            log_data.update(record.extra_data)
+        request_id = getattr(record, "request_id", None)
+        if request_id is not None:
+            log_data["request_id"] = request_id
+        extra_data = getattr(record, "extra_data", None)
+        if isinstance(extra_data, dict):
+            log_data.update(extra_data)
         if record.exc_info and record.exc_info[0] is not None:
             log_data["exception"] = self.formatException(record.exc_info)
         return json.dumps(log_data, ensure_ascii=False)
 
 
 def setup_logging(level: str = "info", log_format: str = "json") -> None:
-    """Configure structured logging for the running application.
+    """Configure structured logging for the openai_http library.
+
+    Idempotent: calling multiple times adds at most one handler.
 
     Args:
         level: The logging level string (e.g. "info", "debug").
         log_format: The output format, "json" or "text".
     """
-    root = logging.getLogger()
-    root.setLevel(getattr(logging, level.upper(), logging.INFO))
-    root.handlers.clear()
-
-    handler = logging.StreamHandler()
-    if log_format == "json":
-        handler.setFormatter(JSONFormatter())
-    else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
-    root.addHandler(handler)
+    logger = logging.getLogger("openai_http")
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    has_stream_handler = any(
+        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+        for h in logger.handlers
+    )
+    if not has_stream_handler:
+        handler = logging.StreamHandler()
+        if log_format == "json":
+            handler.setFormatter(JSONFormatter())
+        else:
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+            )
+        logger.addHandler(handler)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -90,7 +97,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         Returns:
             The HTTP response with X-Request-ID header set.
         """
-        request_id = request.headers.get("x-request-id", str(uuid.uuid4())[:12])
+        request_id = request.headers.get("x-request-id", uuid.uuid4().hex)
         request.state.request_id = request_id
 
         response = await call_next(request)

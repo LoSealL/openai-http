@@ -21,7 +21,9 @@ Compatible with OpenAI v1 /v1/completions endpoint.
 from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
-from openai_http.schemas.common import UsageInfo
+from .common import UsageInfo
+
+CompletionFinishReason = Literal["stop", "length"]
 
 
 class CompletionRequest(BaseModel):
@@ -80,7 +82,7 @@ class TextChoice(BaseModel):
     text: str
     index: int
     logprobs: Optional[Any] = None
-    finish_reason: Optional[Literal["stop", "length"]] = None
+    finish_reason: Optional[CompletionFinishReason] = None
 
 
 class CompletionResponse(BaseModel):
@@ -118,7 +120,7 @@ class CompletionChunkChoice(BaseModel):
     text: str
     index: int
     logprobs: Optional[Any] = None
-    finish_reason: Optional[Literal["stop", "length"]] = None
+    finish_reason: Optional[CompletionFinishReason] = None
 
 
 class CompletionChunk(BaseModel):

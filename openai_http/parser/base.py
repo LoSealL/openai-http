@@ -131,15 +131,9 @@ def strip_special_tokens(text: str, special_tokens: list[str]) -> str:
 class ParserBase(abc.ABC):
     """Abstract base class for reasoning/tool-call text parsers.
 
-    Subclasses set the ``REASONING_START_MARKER`` /
-    ``REASONING_END_MARKER`` class attributes (empty string when the
-    format uses no markers) and implement both abstract methods.
+    Subclasses implement both abstract methods.
     """
 
-    #: Reasoning open tag, or ``""`` when the format has none.
-    REASONING_START_MARKER: str = ""
-    #: Reasoning close tag, or ``""`` when the format has none.
-    REASONING_END_MARKER: str = ""
     #: True when this parser's markers are special tokens in the model's
     #: tokenizer and ``skip_special_tokens=True`` would strip them, breaking
     #: parsing. Backends that respect this decode with

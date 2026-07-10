@@ -16,10 +16,10 @@ limitations under the License.
 OpenAI-compatible HTTP server with pluggable backends.
 """
 
-from openai_http._logging import setup_logging
-from openai_http._server import run_server
-from openai_http.backends.base import BackendBase
-from openai_http.parser import ParserBase
+from .observability.logging import setup_logging
+from ._server import run_server
+from .backends.base import BackendBase
+from .parser import ParserBase
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 __all__ = ["BackendBase", "ParserBase", "__version__", "run_server", "setup_logging"]

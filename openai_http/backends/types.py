@@ -26,7 +26,7 @@ OpenAI response format.
 
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 FinishReason = Literal["stop", "length", "tool_calls", "content_filter"]
 
@@ -39,8 +39,6 @@ class GenerationUsage(BaseModel):
         completion_tokens: Number of tokens generated.
         total_tokens: Sum of prompt and completion tokens.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     prompt_tokens: int = Field(ge=0)
     completion_tokens: int = Field(ge=0)
@@ -55,8 +53,6 @@ class BackendToolCallFunction(BaseModel):
         arguments: A JSON string with the function arguments.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     name: str
     arguments: str
 
@@ -69,8 +65,6 @@ class BackendToolCall(BaseModel):
         type: Always ``"function"``.
         function: The function name and JSON-encoded arguments.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     id: str
     type: Literal["function"] = "function"
@@ -90,8 +84,6 @@ class GenerationResult(BaseModel):
         usage: Token usage statistics.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     generated_text: Optional[str] = None
     reasoning_content: Optional[str] = None
     tool_calls: Optional[list[BackendToolCall]] = None
@@ -107,8 +99,6 @@ class ReasoningChunk(BaseModel):
         content: The reasoning text fragment.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     type: Literal["reasoning"]
     content: str
 
@@ -121,8 +111,6 @@ class ContentChunk(BaseModel):
         content: The content text fragment.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     type: Literal["content"]
     content: str
 
@@ -134,8 +122,6 @@ class FinishChunk(BaseModel):
         type: Always ``"finish"``.
         reason: The finish reason.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["finish"]
     reason: FinishReason
@@ -162,8 +148,6 @@ class ModelInfo(BaseModel):
         created: Unix timestamp of model creation.
         owned_by: The organization that owns the model.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     id: str
     object: Literal["model"] = "model"

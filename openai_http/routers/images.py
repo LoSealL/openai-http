@@ -22,7 +22,7 @@ POST /v1/images/variations   - create image variations
 
 from fastapi import APIRouter
 
-from openai_http.errors import NotImplementedOpenAIError
+from ..errors import NotImplementedOpenAIError
 
 router = APIRouter(tags=["Images"])
 
