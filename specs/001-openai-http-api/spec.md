@@ -163,7 +163,7 @@ A developer authenticates requests using a Bearer token in the `Authorization` h
 - What happens when the backend model runs out of memory during generation? The service MUST return a 500 with a structured OpenAI-format error body (`error.type: "server_error"`, `error.message`), not a raw traceback.
 - What happens when a streaming connection is dropped mid-generation? The service MUST clean up backend resources (stop generation, free GPU memory) and not leave orphaned processes.
 - What happens when concurrent requests exceed the backend's capacity? The service MUST queue requests in the bounded FIFO queue (one active, up to 32 queued by default) and reject excess requests with a 429 Too Many Requests response and `Retry-After` header.
-- What happens when a request body is malformed or unparseable JSON? The service MUST return 400 with `error.type: "invalid_request_error"` and a descriptive message, not a generic 500.
+- What happens when a request body is malformed or unparsable JSON? The service MUST return 400 with `error.type: "invalid_request_error"` and a descriptive message, not a generic 500.
 - What happens when a token array (for embeddings) exceeds the model's context length? The service MUST return 400 with `error.type: "invalid_request_error"` indicating the input is too long.
 - What happens when the service receives a request to an undefined route (e.g., `GET /v1/nonexistent`)? The service MUST return 404 with a structured error response, not an HTML error page.
 - What happens when `max_tokens` in a request is 0 or negative? The service MUST return a 400 error with a descriptive message.

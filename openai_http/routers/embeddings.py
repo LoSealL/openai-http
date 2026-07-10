@@ -35,7 +35,6 @@ from ..schemas.embeddings import (
     floats_to_base64,
 )
 
-
 router = APIRouter(tags=["Embeddings"], dependencies=[Depends(verify_api_key)])
 
 
@@ -78,8 +77,10 @@ async def create_embeddings(
 
     try:
         embeddings = await backend.embed(texts, **kwargs)
-    except NotImplementedError:
-        raise NotImplementedOpenAIError("Embeddings are not supported by this backend")
+    except NotImplementedError as ex:
+        raise NotImplementedOpenAIError(
+            "Embeddings are not supported by this backend"
+        ) from ex
 
     data: list[EmbeddingObject] = []
     for i, vec in enumerate(embeddings):

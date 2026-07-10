@@ -257,7 +257,6 @@ def test_strip_special_tokens_multiple_kinds():
     assert out == "abc"
 
 
-
 def test_strip_special_tokens_handles_regex_meta_chars():
     """Special tokens may contain regex metacharacters (e.g. <|...|>)."""
     out = strip_special_tokens("x<|im_end|>y", ["<|im_end|>"])

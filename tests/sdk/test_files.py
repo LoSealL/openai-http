@@ -2,11 +2,13 @@ import pytest
 import io
 from .test_base import OpenAITestBase
 
-_MOCK_JSONL = "\n".join([
-    '{"prompt": "What is AI?", "completion": "AI is artificial intelligence"}',
-    '{"prompt": "Define ML", "completion": "ML is machine learning"}',
-    '{"prompt": "Explain NN", "completion": "NN is neural network"}',
-])
+_MOCK_JSONL = "\n".join(
+    [
+        '{"prompt": "What is AI?", "completion": "AI is artificial intelligence"}',
+        '{"prompt": "Define ML", "completion": "ML is machine learning"}',
+        '{"prompt": "Explain NN", "completion": "NN is neural network"}',
+    ]
+)
 
 
 def _wrap_call(func):

@@ -241,12 +241,17 @@ class OnnxRuntimeBackend(BackendBase):
         self.image_pad_id = self.tokenizer.convert_tokens_to_ids("<|image_pad|>")
         try:
             from transformers import GenerationConfig
+
             gen_config = GenerationConfig.from_pretrained(self.model_id)
             self.eos_token_ids = (
-                set(gen_config.eos_token_id)
-                if isinstance(gen_config.eos_token_id, list)
-                else {gen_config.eos_token_id}
-            ) if gen_config.eos_token_id else {248046, 248044}
+                (
+                    set(gen_config.eos_token_id)
+                    if isinstance(gen_config.eos_token_id, list)
+                    else {gen_config.eos_token_id}
+                )
+                if gen_config.eos_token_id
+                else {248046, 248044}
+            )
         except Exception:
             self.eos_token_ids = {248046, 248044}
 
@@ -393,10 +398,12 @@ class OnnxRuntimeBackend(BackendBase):
                         images.append(img)
                         new_parts.append({"type": "image"})
                     else:
-                        new_parts.append({
-                            "type": "text",
-                            "text": "[unsupported image]",
-                        })
+                        new_parts.append(
+                            {
+                                "type": "text",
+                                "text": "[unsupported image]",
+                            }
+                        )
                 else:
                     new_parts.append(part)
             normalized.append({**msg, "content": new_parts})
@@ -564,7 +571,9 @@ class OnnxRuntimeBackend(BackendBase):
                 return
 
             next_token_array = np.array([[next_token_id]], dtype=np.int64)
-            inputs_embeds = self.embed_session.run(None, {"input_ids": next_token_array})[0]
+            inputs_embeds = self.embed_session.run(
+                None, {"input_ids": next_token_array}
+            )[0]
 
             position = np.array([total_seq_len - 1], dtype=np.int64)
             position_ids = self._build_position_ids(position)
@@ -601,7 +610,9 @@ class OnnxRuntimeBackend(BackendBase):
         first_token_id = sampler.sample(logits[0, -1, :])
         generated_tokens = [first_token_id]
 
-        for token_id, _ in self._step(first_token_id, prompt_len, sampler, max_new_tokens, past_states):
+        for token_id, _ in self._step(
+            first_token_id, prompt_len, sampler, max_new_tokens, past_states
+        ):
             generated_tokens.append(token_id)
 
         generated_text = self.tokenizer.decode(
@@ -790,7 +801,9 @@ class OnnxRuntimeBackend(BackendBase):
             yield new_text
 
         # Decode loop via shared _step
-        for token_id, _ in self._step(first_token_id, prompt_len, sampler, max_new_tokens, past_states):
+        for token_id, _ in self._step(
+            first_token_id, prompt_len, sampler, max_new_tokens, past_states
+        ):
             accumulated_tokens.append(token_id)
             completion_tokens += 1
             new_text = _yield_new_text()

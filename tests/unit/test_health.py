@@ -52,9 +52,7 @@ def _settings() -> Settings:
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(
-            log_level="debug", log_format="text"
-        ),
+        observability=ObservabilitySettings(log_level="debug", log_format="text"),
     )
 
 
@@ -66,7 +64,9 @@ def _make_app(backend):
 async def healthy_client():
     app = _make_app(_HealthyBackend())
     async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
             yield ac
 
 
@@ -74,7 +74,9 @@ async def healthy_client():
 async def no_metrics_client():
     app = _make_app(_NoMetricsBackend())
     async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
             yield ac
 
 
@@ -82,7 +84,9 @@ async def no_metrics_client():
 async def bad_health_client():
     app = _make_app(_BadHealthBackend())
     async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
             yield ac
 
 
@@ -90,7 +94,9 @@ async def bad_health_client():
 async def failing_health_client():
     app = _make_app(_FailingHealthBackend())
     async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
             yield ac
 
 
@@ -98,7 +104,9 @@ async def failing_health_client():
 async def unhealthy_client():
     app = _make_app(_UnhealthyBackend())
     async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
             yield ac
 
 
@@ -106,7 +114,9 @@ async def unhealthy_client():
 async def non_dict_metrics_client():
     app = _make_app(_NonDictMetricsBackend())
     async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
             yield ac
 
 

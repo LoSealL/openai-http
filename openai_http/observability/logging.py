@@ -67,11 +67,11 @@ def setup_logging(level: str = "info", log_format: str = "json") -> None:
         level: The logging level string (e.g. "info", "debug").
         log_format: The output format, "json" or "text".
     """
-    logger = logging.getLogger("openai_http")
-    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    lib_logger = logging.getLogger("openai_http")
+    lib_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     has_stream_handler = any(
         isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
-        for h in logger.handlers
+        for h in lib_logger.handlers
     )
     if not has_stream_handler:
         handler = logging.StreamHandler()
@@ -81,7 +81,7 @@ def setup_logging(level: str = "info", log_format: str = "json") -> None:
             handler.setFormatter(
                 logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
             )
-        logger.addHandler(handler)
+        lib_logger.addHandler(handler)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):

@@ -23,9 +23,7 @@ class TestEmbeddingsAPI(OpenAITestBase):
 
     def test_embedding_single_text(self, client):
         """Test embedding for single text."""
-        response = _call_or_skip(
-            client, model=MOCK_MODEL, input="The quick brown fox"
-        )
+        response = _call_or_skip(client, model=MOCK_MODEL, input="The quick brown fox")
 
         assert response.object == "list"
         assert len(response.data) == 1
@@ -61,15 +59,11 @@ class TestEmbeddingsAPI(OpenAITestBase):
 
     def test_embedding_special_characters(self, client):
         """Test with special characters."""
-        response = _call_or_skip(
-            client, model=MOCK_MODEL, input="Hello 世界! 🌍 \n\t"
-        )
+        response = _call_or_skip(client, model=MOCK_MODEL, input="Hello 世界! 🌍 \n\t")
         assert response.object == "list"
         assert len(response.data) > 0
 
     def test_embedding_unicode(self, client):
         """Test with unicode characters."""
-        response = _call_or_skip(
-            client, model=MOCK_MODEL, input="Unicode: αβγ δεζ ηθι"
-        )
+        response = _call_or_skip(client, model=MOCK_MODEL, input="Unicode: αβγ δεζ ηθι")
         assert response.object == "list"

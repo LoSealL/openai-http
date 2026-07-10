@@ -199,11 +199,11 @@ async def _chat_stream(
 
                 yield "data: [DONE]\n\n"
 
-        except Exception as e:
+        except Exception:  # pylint: disable=broad-exception-caught
             error_msg = json.dumps(
                 {
                     "error": {
-                        "message": str(e),
+                        "message": "Internal server error. Please try again later.",
                         "type": "server_error",
                         "param": None,
                         "code": "generation_error",

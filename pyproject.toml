@@ -26,18 +26,8 @@ version = { attr = "openai_http.__version__" }
 asyncio_mode = "auto"
 
 [project.optional-dependencies]
-cpu = [
-    "torch",
-    "torchvision",
-]
-cuda = [
-    "torch",
-    "torchvision",
-]
-app = [
-    "onnxruntime-gpu",
-    "transformers>=5.0.0",
-]
+cpu = ["torch", "torchvision"]
+cuda = ["torch", "torchvision"]
 
 [dependency-groups]
 dev = [
@@ -77,9 +67,11 @@ conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
 
 [tool.pylint."messages control"]
 disable = [
-    "too-few-public-methods",  # R0903: Pydantic models and Exception subclasses
-    "too-many-arguments",      # R0913: public API functions with keyword-only args
-    "too-many-locals",         # R0914: mock backend generate() complexity
-    "too-many-branches",       # R0912: mock backend generate() complexity
-    "too-many-statements",     # R0915: mock backend generate() complexity
+    "too-few-public-methods",        # R0903: Pydantic models and Exception subclasses
+    "too-many-arguments",            # R0913: public API functions with keyword-only args
+    "too-many-locals",               # R0914: mock backend generate() complexity
+    "too-many-branches",             # R0912: mock backend generate() complexity
+    "too-many-positional-arguments", # R0913: public API functions with positional args
+    "too-many-statements",           # R0915: mock backend generate() complexity
+    "duplicate-code",                # R0801: chat and completions share boilerplate (model lookup, SSE headers)
 ]

@@ -40,9 +40,7 @@ async def no_embed_client():
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(
-            log_level="debug", log_format="text"
-        ),
+        observability=ObservabilitySettings(log_level="debug", log_format="text"),
     )
     backend = _NoEmbedBackend()
     app = create_app(config=settings, backend=backend)

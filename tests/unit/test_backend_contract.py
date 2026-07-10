@@ -49,7 +49,6 @@ class TestGenerationResultValidation:
         assert exc.value.status_code == 500
         assert exc.value.code == "backend_contract_error"
 
-
     def test_pydantic_instance_passes_through(self):
         instance = GenerationResult(
             generated_text="x",
@@ -128,4 +127,3 @@ class TestModelInfoValidation:
     def test_non_list_raises(self):
         with pytest.raises(OpenAIError):
             validate_model_list({"not": "a list"})
-

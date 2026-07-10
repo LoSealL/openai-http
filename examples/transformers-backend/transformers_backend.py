@@ -185,10 +185,12 @@ class TransformersBackend(BackendBase):
                         images.append(img)
                         new_parts.append({"type": "image"})
                     else:
-                        new_parts.append({
-                            "type": "text",
-                            "text": "[unsupported image]",
-                        })
+                        new_parts.append(
+                            {
+                                "type": "text",
+                                "text": "[unsupported image]",
+                            }
+                        )
                 else:
                     new_parts.append(part)
             normalized.append({**msg, "content": new_parts})
@@ -451,15 +453,13 @@ if __name__ == "__main__":
         "--reasoning-parser",
         default="qwen",
         choices=available_parsers(),
-        help="Reasoning parser name (registered in openai_http.parser). "
-        "Default: qwen.",
+        help="Reasoning parser name (registered in openai_http.parser). Default: qwen.",
     )
     parser.add_argument(
         "--tool-call-parser",
         default="qwen",
         choices=available_parsers(),
-        help="Tool-call parser name (registered in openai_http.parser). "
-        "Default: qwen.",
+        help="Tool-call parser name (registered in openai_http.parser). Default: qwen.",
     )
     args = parser.parse_args()
 

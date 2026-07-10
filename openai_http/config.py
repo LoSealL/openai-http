@@ -26,7 +26,7 @@ Usage:
 
 import tomllib
 from pathlib import Path
-from typing import Self
+from typing import ClassVar, Self
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     queue: QueueSettings = QueueSettings()
     observability: ObservabilitySettings = ObservabilitySettings()
 
-    _singleton: Self | None = None
+    _singleton: ClassVar[Self | None] = None
 
     @classmethod
     def from_toml(cls, config_path: str = "config.toml") -> Self:

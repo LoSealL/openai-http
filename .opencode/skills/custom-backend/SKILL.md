@@ -72,10 +72,6 @@ if __name__ == "__main__":
     openai_http.run_server(backend=MyBackend(), port=8000)
 ```
 
-### Validation at Startup
-
-Unless `skip_validation=True`, `run_server()` performs a fail-fast contract check at startup: calls each method with sample inputs, checks return types, exits with a clear error if validation fails.
-
 ### Configuration Options
 
 | `run_server` parameter | Default | Description |
@@ -85,7 +81,6 @@ Unless `skip_validation=True`, `run_server()` performs a fail-fast contract chec
 | `log_level` | `"info"` | Uvicorn log level |
 | `api_keys` | `None` | List of API keys for Bearer auth (no auth if empty/None) |
 | `queue_depth` | `32` | Max pending requests before HTTP 429 |
-| `skip_validation` | `False` | Skip startup contract checks |
 
 ## Error Handling
 
