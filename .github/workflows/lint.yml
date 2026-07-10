@@ -1,0 +1,18 @@
+name: Lint
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra=cpu --dev
+      - run: uv run ruff check openai_http/ tests/
+      - run: uv run pylint openai_http/
+      - run: uv run pyright openai_http/

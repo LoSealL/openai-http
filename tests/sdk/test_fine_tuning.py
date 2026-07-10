@@ -1,29 +1,14 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Tests for OpenAI Fine-tuning API.
-
-Tests: client.fine_tuning.jobs.*
-
-NOTE: /v1/fine_tuning is P3 — skipped until implemented.
-"""
-
 import pytest
 import io
-from .test_base import OpenAITestBase, MOCK_MODELS
-from .mock_data import mock_jsonl_content
+from .test_base import OpenAITestBase, MOCK_MODEL
+
+_MOCK_JSONL = "\n".join(
+    [
+        '{"prompt": "What is AI?", "completion": "AI is artificial intelligence"}',
+        '{"prompt": "Define ML", "completion": "ML is machine learning"}',
+        '{"prompt": "Explain NN", "completion": "NN is neural network"}',
+    ]
+)
 
 
 def _wrap_call(func, endpoint_skip="Fine-tuning API"):
@@ -43,7 +28,7 @@ class TestFineTuningAPI(OpenAITestBase):
         """Helper to create a training file."""
 
         def do_upload():
-            file_content = mock_jsonl_content()
+            file_content = _MOCK_JSONL
             file_obj = io.BytesIO(file_content.encode("utf-8"))
             file_obj.name = "training_data.jsonl"
             return client.files.create(file=file_obj, purpose="fine-tune")
@@ -57,7 +42,7 @@ class TestFineTuningAPI(OpenAITestBase):
 
         def do_create():
             return client.fine_tuning.jobs.create(
-                training_file=file_id, model=MOCK_MODELS[0]
+                training_file=file_id, model=MOCK_MODEL
             )
 
         response = _wrap_call(do_create, "Fine-tuning API (Phase 11)")
@@ -88,7 +73,7 @@ class TestFineTuningAPI(OpenAITestBase):
 
         try:
             created = client.fine_tuning.jobs.create(
-                training_file=file_id, model=MOCK_MODELS[0]
+                training_file=file_id, model=MOCK_MODEL
             )
         except Exception as e:
             if "404" in str(e):
@@ -105,7 +90,7 @@ class TestFineTuningAPI(OpenAITestBase):
 
         try:
             created = client.fine_tuning.jobs.create(
-                training_file=file_id, model=MOCK_MODELS[0]
+                training_file=file_id, model=MOCK_MODEL
             )
         except Exception as e:
             if "404" in str(e):
@@ -120,7 +105,7 @@ class TestFineTuningAPI(OpenAITestBase):
         try:
             file_id = self._create_training_file(client)
             created = client.fine_tuning.jobs.create(
-                training_file=file_id, model=MOCK_MODELS[0]
+                training_file=file_id, model=MOCK_MODEL
             )
         except Exception as e:
             if "404" in str(e):
@@ -138,7 +123,7 @@ class TestFineTuningAPI(OpenAITestBase):
         def do_create():
             return client.fine_tuning.jobs.create(
                 training_file=file_id,
-                model=MOCK_MODELS[0],
+                model=MOCK_MODEL,
                 hyperparameters={"n_epochs": 3},
             )
 
@@ -149,7 +134,7 @@ class TestFineTuningAPI(OpenAITestBase):
         """Test creating job with invalid file ID."""
         try:
             client.fine_tuning.jobs.create(
-                training_file="file-non-existent", model=MOCK_MODELS[0]
+                training_file="file-non-existent", model=MOCK_MODEL
             )
             assert False, "Should have raised"
         except Exception as e:

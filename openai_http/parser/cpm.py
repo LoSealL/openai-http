@@ -52,16 +52,13 @@ Tool-call format::
 
 import re
 
-from openai_http.parser import register_parser
-from openai_http.parser.base import (
+from . import register_parser
+from .base import (
     ParserBase,
     ReasoningResult,
     ToolCallResult,
     make_tool_call,
 )
-
-REASONING_START_MARKER = "<think>"
-REASONING_END_MARKER = "</think>"
 
 _FUNC_RE = re.compile(r'<function\s+name="([^"]+)">(.*?)</function>', re.DOTALL)
 _PARAM_RE = re.compile(r'<param\s+name="([^"]+)">(.*?)</param>', re.DOTALL)
@@ -71,8 +68,6 @@ _CDATA_RE = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.DOTALL)
 class CpmParser(ParserBase):
     """Parser for MiniCPM5 reasoning and tool-call syntax."""
 
-    REASONING_START_MARKER = REASONING_START_MARKER
-    REASONING_END_MARKER = REASONING_END_MARKER
     # MiniCPM5 registers <function / <param / <tool_call> / </tool_call> as
     # special tokens; skip_special_tokens=True would delete them and make
     # function and param tags indistinguishable. Backends read this flag,
@@ -90,11 +85,11 @@ class CpmParser(ParserBase):
             A :class:`ReasoningResult`; ``reasoning`` is ``None`` when
             no ``</think>`` marker is present.
         """
-        idx = model_output.find(self.REASONING_END_MARKER)
+        idx = model_output.find("</think>")
         if idx == -1:
             return ReasoningResult(reasoning=None, content=model_output)
         reasoning = model_output[:idx]
-        content = model_output[idx + len(self.REASONING_END_MARKER) :].lstrip("\n")
+        content = model_output[idx + 8 :].lstrip("\n")
         return ReasoningResult(reasoning=(reasoning or None), content=content)
 
     def parse_tool_calls(self, model_output: str) -> ToolCallResult:

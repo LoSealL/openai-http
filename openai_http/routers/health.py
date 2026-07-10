@@ -24,7 +24,7 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from openai_http.errors import NotImplementedOpenAIError
+from ..errors import NotImplementedOpenAIError
 
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ async def health_check(request: Request) -> JSONResponse:
 
     try:
         models = await backend.list_models()
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         models = []
 
     content = {
@@ -75,7 +75,7 @@ async def health_check(request: Request) -> JSONResponse:
             content.update(backend_health)
     except NotImplementedError:
         pass
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.exception("Backend health check failed")
         content["status"] = "not_ready"
         content["health_error"] = str(exc)
@@ -110,11 +110,10 @@ async def metrics(request: Request) -> JSONResponse:
 
     try:
         backend_metrics = await backend.metrics()
-    except NotImplementedError:
-        raise NotImplementedOpenAIError("Metrics are not supported by this backend")
-
-    if not isinstance(backend_metrics, dict):
-        backend_metrics = {"data": backend_metrics}
+    except NotImplementedError as exc:
+        raise NotImplementedOpenAIError(
+            "Metrics are not supported by this backend"
+        ) from exc
 
     return JSONResponse(
         content={"status": "ok", "metrics": backend_metrics},

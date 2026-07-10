@@ -21,28 +21,28 @@ POST /v1/chat/completions - chat completion (streaming + non-streaming)
 import json
 import time
 import uuid
-from typing import Any, AsyncGenerator, Literal
+from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from openai_http.auth import verify_api_key
-from openai_http.backends.contract import (
+from ..auth import verify_api_key
+from ..backends.contract import (
     validate_generation,
     validate_stream_chunk,
 )
-from openai_http.backends.types import (
+from ..backends.types import (
     BackendToolCall,
     ContentChunk,
     FinishChunk,
     GenerationUsage,
     ReasoningChunk,
 )
-from openai_http.errors import (
+from ..errors import (
     InvalidRequestError,
     NotFoundError,
 )
-from openai_http.schemas.chat import (
+from ..schemas.chat import (
     ChatCompletionChunk,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -50,10 +50,11 @@ from openai_http.schemas.chat import (
     ChoiceMessage,
     ChunkChoice,
     DeltaMessage,
+    FinishReason,
     FunctionCall,
     ToolCall,
 )
-from openai_http.schemas.common import UsageInfo
+from ..schemas.common import UsageInfo
 
 router = APIRouter(tags=["Chat"], dependencies=[Depends(verify_api_key)])
 
@@ -104,7 +105,6 @@ async def chat_completions(
         NotImplementedOpenAIError: If tool calls are requested but not supported.
     """
     backend = request.app.state.backend
-    queue = request.app.state.queue
 
     model_info = await backend.get_model(body.model)
     if model_info is None:
@@ -118,109 +118,125 @@ async def chat_completions(
 
     request_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
-    messages = [_serialize_message(m) for m in body.messages]
+    messages = [
+        m.model_dump(exclude_none=True) | {"content": m.content or ""}
+        for m in body.messages
+    ]
 
-    kwargs: dict[str, Any] = {}
-    if body.max_tokens is not None:
-        kwargs["max_tokens"] = body.max_tokens
-    if body.temperature is not None:
-        kwargs["temperature"] = body.temperature
-    if body.top_p is not None:
-        kwargs["top_p"] = body.top_p
-    extra = body.model_extra or {}
-    if "enable_thinking" in extra:
-        kwargs["enable_thinking"] = extra["enable_thinking"]
-
+    gen_kwargs = body.model_dump(
+        exclude_none=True,
+        exclude={"messages", "stream", "model", "tools", "tool_choice"},
+    )
     if body.tools and body.tool_choice != "none":
-        kwargs["tools"] = [t.model_dump() for t in body.tools]
+        gen_kwargs["tools"] = [t.model_dump() for t in body.tools]
     if body.tool_choice is not None:
-        kwargs["tool_choice"] = body.tool_choice
+        gen_kwargs["tool_choice"] = body.tool_choice
 
     if body.stream:
+        return await _chat_stream(
+            body, request, messages, gen_kwargs, request_id, created
+        )
+    return await _chat_non_stream(
+        body, request, messages, gen_kwargs, request_id, created
+    )
 
-        async def stream_generator() -> AsyncGenerator[str, None]:
-            """Generate streaming chat completion chunks.
 
-            Handles tool call deltas and content streaming.
+async def _chat_stream(
+    body: ChatCompletionRequest,
+    request: Request,
+    messages: list[dict],
+    gen_kwargs: dict[str, Any],
+    request_id: str,
+    created: int,
+) -> StreamingResponse:
+    backend = request.app.state.backend
+    queue = request.app.state.queue
 
-            Yields:
-                str: SSE-formatted chat completion chunks, ending with a [DONE] signal.
-            """
-            try:
-                async with queue.acquire():
-                    yield _make_chunk(
-                        request_id,
-                        body.model,
-                        created,
-                        delta=DeltaMessage(role="assistant"),
-                    )
-
-                    stream_finish_reason: Literal[
-                        "stop", "length", "tool_calls", "content_filter"
-                    ] = "stop"
-                    async for token in backend.generate_stream(messages, **kwargs):
-                        chunk = validate_stream_chunk(token)
-                        delta: DeltaMessage
-                        if isinstance(chunk, FinishChunk):
-                            stream_finish_reason = chunk.reason
-                            continue
-                        if isinstance(chunk, ReasoningChunk):
-                            delta = DeltaMessage(reasoning_content=chunk.content)
-                        elif isinstance(chunk, ContentChunk):
-                            delta = DeltaMessage(content=chunk.content)
-                        else:
-                            delta = DeltaMessage(content=chunk)
-                        yield _make_chunk(
-                            request_id,
-                            body.model,
-                            created,
-                            delta=delta,
-                        )
-
-                    final_usage: UsageInfo | None = None
-                    if body.stream_options and body.stream_options.get("include_usage"):
-                        final_usage = UsageInfo(
-                            prompt_tokens=0,
-                            completion_tokens=0,
-                            total_tokens=0,
-                        )
-                    yield _make_chunk(
-                        request_id,
-                        body.model,
-                        created,
-                        delta=DeltaMessage(),
-                        finish_reason=stream_finish_reason,
-                        usage=final_usage,
-                    )
-
-                    yield "data: [DONE]\n\n"
-
-            except Exception as e:
-                error_msg = json.dumps(
-                    {
-                        "error": {
-                            "message": str(e),
-                            "type": "server_error",
-                            "param": None,
-                            "code": "generation_error",
-                        }
-                    }
+    async def stream_generator() -> AsyncGenerator[str, None]:
+        try:
+            async with queue.acquire():
+                yield _make_chunk(
+                    request_id,
+                    body.model,
+                    created,
+                    delta=DeltaMessage(role="assistant"),
                 )
-                yield f"data: {error_msg}\n\n"
+
+                stream_finish_reason: FinishReason = "stop"
+                async for token in backend.generate_stream(messages, **gen_kwargs):
+                    chunk = validate_stream_chunk(token)
+                    if isinstance(chunk, FinishChunk):
+                        stream_finish_reason = chunk.reason
+                        continue
+                    if isinstance(chunk, ReasoningChunk):
+                        delta = DeltaMessage(reasoning_content=chunk.content)
+                    elif isinstance(chunk, ContentChunk):
+                        delta = DeltaMessage(content=chunk.content)
+                    else:
+                        delta = DeltaMessage(content=chunk)
+                    yield _make_chunk(
+                        request_id,
+                        body.model,
+                        created,
+                        delta=delta,
+                    )
+
+                final_usage: UsageInfo | None = None
+                if body.stream_options and body.stream_options.get("include_usage"):
+                    final_usage = UsageInfo(
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        total_tokens=0,
+                    )
+                yield _make_chunk(
+                    request_id,
+                    body.model,
+                    created,
+                    delta=DeltaMessage(),
+                    finish_reason=stream_finish_reason,
+                    usage=final_usage,
+                )
+
                 yield "data: [DONE]\n\n"
 
-        return StreamingResponse(
-            stream_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        except Exception:  # pylint: disable=broad-exception-caught
+            error_msg = json.dumps(
+                {
+                    "error": {
+                        "message": "Internal server error. Please try again later.",
+                        "type": "server_error",
+                        "param": None,
+                        "code": "generation_error",
+                    }
+                }
+            )
+            yield f"data: {error_msg}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _chat_non_stream(
+    body: ChatCompletionRequest,
+    request: Request,
+    messages: list[dict],
+    gen_kwargs: dict[str, Any],
+    request_id: str,
+    created: int,
+) -> JSONResponse:
+    backend = request.app.state.backend
+    queue = request.app.state.queue
 
     async with queue.acquire():
-        raw_result = await backend.generate(messages, **kwargs)
+        raw_result = await backend.generate(messages, **gen_kwargs)
         result = validate_generation(raw_result)
 
     message = ChoiceMessage(
@@ -249,32 +265,12 @@ async def chat_completions(
     return JSONResponse(content=response.model_dump(exclude_none=True))
 
 
-def _serialize_message(m) -> dict:
-    """Serialize a chat message to a dictionary.
-
-    Includes tool_calls and tool_call_id if present.
-
-    Args:
-        m: A chat message object with role, content, and optional tool fields.
-
-    Returns:
-        dict: The serialized message dictionary.
-    """
-    msg = {"role": m.role, "content": m.content or ""}
-    if m.tool_calls:
-        msg["tool_calls"] = [tc.model_dump() for tc in m.tool_calls]
-    if m.tool_call_id:
-        msg["tool_call_id"] = m.tool_call_id
-    return msg
-
-
 def _make_chunk(
     request_id: str,
     model: str,
     created: int,
     delta: DeltaMessage,
-    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"]
-    | None = None,
+    finish_reason: FinishReason | None = None,
     usage: UsageInfo | None = None,
 ) -> str:
     """Build an SSE-formatted chat completion chunk.

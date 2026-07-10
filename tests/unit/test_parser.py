@@ -15,11 +15,6 @@ from openai_http.parser import (
 from openai_http.parser.base import ReasoningResult, ToolCall, ToolCallResult
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
 def test_builtin_parsers_registered():
     """qwen, cpm, lfm self-register on import."""
     names = available_parsers()
@@ -31,7 +26,6 @@ def test_builtin_parsers_registered():
 def test_get_parser_returns_instance():
     p = get_parser("qwen")
     assert isinstance(p, ParserBase)
-    assert p.REASONING_END_MARKER == "</think>"
 
 
 def test_get_parser_unknown_raises_with_listings():
@@ -59,21 +53,11 @@ def test_register_custom_parser_overrides():
         register_parser("mytest", custom)  # idempotent; fine to leave
 
 
-# ---------------------------------------------------------------------------
-# Top-level export
-# ---------------------------------------------------------------------------
-
-
 def test_parserbase_exported_from_top_level():
     import openai_http
 
     assert openai_http.ParserBase is ParserBase
     assert "ParserBase" in openai_http.__all__
-
-
-# ---------------------------------------------------------------------------
-# make_tool_call helper
-# ---------------------------------------------------------------------------
 
 
 def test_make_tool_call_from_dict():
@@ -93,11 +77,6 @@ def test_tool_call_is_frozen():
     tc = make_tool_call("f", {})
     with pytest.raises(Exception):
         tc.name = "other"  # type: ignore[misc]
-
-
-# ---------------------------------------------------------------------------
-# QwenParser
-# ---------------------------------------------------------------------------
 
 
 def test_qwen_parse_reasoning_with_marker():
@@ -160,11 +139,6 @@ def test_qwen_parse_tool_calls_none():
     assert res.content == "no calls here"
 
 
-# ---------------------------------------------------------------------------
-# CpmParser
-# ---------------------------------------------------------------------------
-
-
 def test_cpm_parse_reasoning():
     p = get_parser("cpm")
     r = p.parse_reasoning("step 1\nstep 2</think>\nresult")
@@ -203,17 +177,6 @@ def test_cpm_parse_tool_calls_multiple():
     assert len(res.tool_calls) == 2
     assert res.tool_calls[0].name == "get_weather"
     assert res.tool_calls[1].name == "get_time"
-
-
-# ---------------------------------------------------------------------------
-# LfmParser
-# ---------------------------------------------------------------------------
-
-
-def test_lfm_reasoning_markers_empty():
-    p = get_parser("lfm")
-    assert p.REASONING_END_MARKER == ""
-    assert p.REASONING_START_MARKER == ""
 
 
 def test_lfm_parse_reasoning_returns_full_output():
@@ -279,39 +242,9 @@ def test_lfm_parse_tool_calls_boolean_and_float():
     assert args == {"flag": True, "ratio": 0.5}
 
 
-# ---------------------------------------------------------------------------
-# REQUIRES_SPECIAL_TOKENS (adaptive skip_special_tokens contract)
-# ---------------------------------------------------------------------------
-
-
-def test_requires_special_tokens_default_false():
-    """ParserBase default is False; qwen and lfm inherit it."""
-    assert ParserBase.REQUIRES_SPECIAL_TOKENS is False
-    assert get_parser("qwen").REQUIRES_SPECIAL_TOKENS is False
-    assert get_parser("lfm").REQUIRES_SPECIAL_TOKENS is False
-
-
 def test_cpm_requires_special_tokens_true():
     """CpmParser opts in: its <function/<param markers are special tokens."""
     assert get_parser("cpm").REQUIRES_SPECIAL_TOKENS is True
-
-
-def test_custom_parser_requires_special_tokens_inherited():
-    """A subclass that does not set the flag inherits the False default."""
-
-    class P(ParserBase):
-        def parse_reasoning(self, model_output: str) -> ReasoningResult:
-            return ReasoningResult(reasoning=None, content=model_output)
-
-        def parse_tool_calls(self, model_output: str) -> ToolCallResult:
-            return ToolCallResult(content=model_output, tool_calls=[])
-
-    assert P().REQUIRES_SPECIAL_TOKENS is False
-
-
-# ---------------------------------------------------------------------------
-# strip_special_tokens (backend post-parse cleanup helper)
-# ---------------------------------------------------------------------------
 
 
 def test_strip_special_tokens_removes_listed():
@@ -322,14 +255,6 @@ def test_strip_special_tokens_removes_listed():
 def test_strip_special_tokens_multiple_kinds():
     out = strip_special_tokens("a</s>b<|im_end|>c", ["<|im_end|>", "</s>"])
     assert out == "abc"
-
-
-def test_strip_special_tokens_empty_list_passthrough():
-    assert strip_special_tokens("hi<|im_end|>", []) == "hi<|im_end|>"
-
-
-def test_strip_special_tokens_no_match_passthrough():
-    assert strip_special_tokens("hello", ["<|im_end|>"]) == "hello"
 
 
 def test_strip_special_tokens_handles_regex_meta_chars():

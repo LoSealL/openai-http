@@ -13,7 +13,6 @@ Dependencies:
 
 import argparse
 import asyncio
-import base64
 import io
 import time
 from typing import Any, AsyncGenerator, Optional
@@ -46,6 +45,7 @@ class TransformersBackend(BackendBase):
         model_id: str = DEFAULT_MODEL,
         name: str | None = None,
         temperature: float = 0.0,
+        top_p: float = 1.0,
         max_tokens: int = 1024,
         vision: bool = False,
         reasoning_parser: str = "qwen",
@@ -54,6 +54,7 @@ class TransformersBackend(BackendBase):
         self.model_id = model_id
         self.model_name = name or model_id
         self.temperature = temperature
+        self.top_p = top_p
         self.thinking = True
         self.max_tokens = max_tokens
         self.vision = vision
@@ -121,8 +122,6 @@ class TransformersBackend(BackendBase):
         return processor, tokenizer, model
 
     async def teardown(self) -> None:
-        self.model = None
-        self.tokenizer = None
         torch.cuda.empty_cache()
         import gc
 
@@ -186,10 +185,12 @@ class TransformersBackend(BackendBase):
                         images.append(img)
                         new_parts.append({"type": "image"})
                     else:
-                        new_parts.append({
-                            "type": "text",
-                            "text": "[unsupported image]",
-                        })
+                        new_parts.append(
+                            {
+                                "type": "text",
+                                "text": "[unsupported image]",
+                            }
+                        )
                 else:
                     new_parts.append(part)
             normalized.append({**msg, "content": new_parts})
@@ -203,12 +204,11 @@ class TransformersBackend(BackendBase):
         """
         if not isinstance(url, str) or not url.startswith("data:"):
             return None
-        _, _, data = url.partition(",")
+
         try:
-            raw = base64.b64decode(data, validate=True)
-        except Exception:
-            return None
-        try:
+            import base64
+
+            raw = base64.b64decode(url.split(",", 1)[1])
             return Image.open(io.BytesIO(raw)).convert("RGB")
         except Exception:
             return None
@@ -386,7 +386,6 @@ class TransformersBackend(BackendBase):
         prompt: list[dict[str, Any]],
         **kwargs: Any,
     ) -> AsyncGenerator[str | dict[str, Any], None]:
-        yield ""
         raise NotImplementedError("Streaming is not supported by this backend")
 
     async def list_models(self) -> list[dict]:
@@ -421,12 +420,6 @@ if __name__ == "__main__":
         help=f"HuggingFace model ID (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
-        "--name",
-        "-n",
-        default=None,
-        help="Custom model name to serve (overrides --model for API responses)",
-    )
-    parser.add_argument(
         "--host",
         default="0.0.0.0",
         help="Server bind address (default: 0.0.0.0)",
@@ -445,18 +438,10 @@ if __name__ == "__main__":
         help="Sampling temperature (default: 0.0 for greedy)",
     )
     parser.add_argument(
-        "--reasoning-parser",
-        default="qwen",
-        choices=available_parsers(),
-        help="Reasoning parser name (registered in openai_http.parser). "
-        "Default: qwen.",
-    )
-    parser.add_argument(
-        "--tool-call-parser",
-        default="qwen",
-        choices=available_parsers(),
-        help="Tool-call parser name (registered in openai_http.parser). "
-        "Default: qwen.",
+        "--top-p",
+        type=float,
+        default=1.0,
+        help="Nucleus sampling threshold (default: 1.0 = off)",
     )
     parser.add_argument(
         "--max-tokens",
@@ -465,19 +450,24 @@ if __name__ == "__main__":
         help="Maximum new tokens per response (default: 1024)",
     )
     parser.add_argument(
-        "--vision",
-        "-vl",
-        action="store_true",
-        help="Load as a vision-language model to accept image inputs (base64 data URIs)",
+        "--reasoning-parser",
+        default="qwen",
+        choices=available_parsers(),
+        help="Reasoning parser name (registered in openai_http.parser). Default: qwen.",
+    )
+    parser.add_argument(
+        "--tool-call-parser",
+        default="qwen",
+        choices=available_parsers(),
+        help="Tool-call parser name (registered in openai_http.parser). Default: qwen.",
     )
     args = parser.parse_args()
 
     backend = TransformersBackend(
         model_id=args.model,
-        name=args.name,
         temperature=args.temperature,
+        top_p=args.top_p,
         max_tokens=args.max_tokens,
-        vision=args.vision,
         reasoning_parser=args.reasoning_parser,
         toolcall_parser=args.tool_call_parser,
     )

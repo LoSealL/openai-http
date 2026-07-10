@@ -22,7 +22,7 @@ POST /v1/audio/speech          - generate speech from text
 
 from fastapi import APIRouter
 
-from openai_http.errors import NotImplementedOpenAIError
+from ..errors import NotImplementedOpenAIError
 
 router = APIRouter(tags=["Audio"])
 

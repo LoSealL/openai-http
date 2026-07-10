@@ -22,7 +22,9 @@ their modules are imported below; external parsers register via
 :func:`get_parser` at backend load time.
 """
 
-from openai_http.parser.base import (
+# pylint:disable=duplicate-code  # R0801: lfm/qwen tool-call assembly is structurally similar but semantically distinct
+
+from .base import (
     ParserBase,
     ReasoningResult,
     ToolCall,
@@ -90,6 +92,6 @@ def available_parsers() -> list[str]:
 
 # Eagerly import built-ins so they self-register. These modules call
 # register_parser("qwen"/"cpm"/"lfm", ...) as a side effect of import.
-from openai_http.parser import cpm as _cpm  # noqa: E402,F401
-from openai_http.parser import lfm as _lfm  # noqa: E402,F401
-from openai_http.parser import qwen as _qwen  # noqa: E402,F401
+from . import cpm as _cpm  # noqa: E402,F401  pylint:disable=wrong-import-position,cyclic-import
+from . import lfm as _lfm  # noqa: E402,F401  pylint:disable=wrong-import-position,cyclic-import
+from . import qwen as _qwen  # noqa: E402,F401  pylint:disable=wrong-import-position,cyclic-import

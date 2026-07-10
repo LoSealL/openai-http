@@ -25,10 +25,12 @@ Tool-call format (bracketed calls)::
 Argument values may be quoted strings, numbers, booleans, or bare words.
 """
 
+# pylint:disable=duplicate-code  # R0801: tool-call assembly similar to qwen.py
+
 import re
 
-from openai_http.parser import register_parser
-from openai_http.parser.base import (
+from . import register_parser
+from .base import (
     ParserBase,
     ReasoningResult,
     ToolCallResult,
@@ -43,10 +45,6 @@ _PARAM_RE = re.compile(r'(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^,
 
 class LfmParser(ParserBase):
     """Parser for LFM reasoning and tool-call syntax."""
-
-    # LFM uses no reasoning markers.
-    REASONING_START_MARKER = ""
-    REASONING_END_MARKER = ""
 
     def parse_reasoning(self, model_output: str) -> ReasoningResult:
         """Return the full output as content; LFM has no reasoning markers.
@@ -102,19 +100,17 @@ def _parse_args(raw: str) -> dict[str, object]:
     for match in _PARAM_RE.finditer(raw):
         key = match.group(1)
         value: object = match.group(2)
-        if (
-            isinstance(value, str)
-            and len(value) >= 2
-            and (
-                (value[0] == '"' and value[-1] == '"')
-                or (value[0] == "'" and value[-1] == "'")
-            )
-        ):
+        if isinstance(value, str) and len(value) >= 2 and _is_quoted(value):
             value = value[1:-1]
         elif isinstance(value, str):
             value = _coerce_scalar(value)
         args[key] = value
     return args
+
+
+def _is_quoted(s: str) -> bool:
+    """Return True if *s* is wrapped in matching single or double quotes."""
+    return (s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")
 
 
 def _coerce_scalar(value: str) -> object:

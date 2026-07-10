@@ -19,15 +19,11 @@ Provides the ``run_server`` entry point that wires a BackendBase
 implementation to the FastAPI application and starts uvicorn.
 """
 
-import asyncio
-import sys
-
 import uvicorn
 
-from openai_http._validation import BackendValidationError, validate_backend
-from openai_http.app import create_app
-from openai_http.backends.base import BackendBase
-from openai_http.config import (
+from .app import create_app
+from .backends.base import BackendBase
+from .config import (
     AuthSettings,
     ObservabilitySettings,
     QueueSettings,
@@ -44,12 +40,12 @@ def run_server(
     log_level: str = "info",
     api_keys: list[str] | None = None,
     queue_depth: int = 32,
-    skip_validation: bool = False,
 ) -> None:
     """Run the openai_http server with a given backend.
 
-    Validates the backend (unless skipped), builds configuration from
-    parameters, creates the FastAPI app, and starts uvicorn.
+    Builds configuration from parameters, creates the FastAPI app, and
+    starts uvicorn.  Backend ``setup()`` / ``teardown()`` are handled by
+    the lifespan context manager.
 
     Args:
         backend: Backend instance to serve inference requests.
@@ -58,25 +54,14 @@ def run_server(
         log_level: Logging level (e.g. ``"info"``, ``"debug"``).
         api_keys: Optional list of accepted API keys for auth.
         queue_depth: Maximum number of queued requests.
-        skip_validation: If True, skip backend validation checks.
 
     Raises:
         TypeError: If *backend* is not a BackendBase instance.
-        SystemExit: If backend validation fails.
     """
     if not isinstance(backend, BackendBase):
         raise TypeError(
             f"backend must be an instance of BackendBase, got {type(backend).__name__}"
         )
-
-    if not skip_validation:
-        try:
-            asyncio.run(backend.setup())
-            backend._openai_http_initialized = True
-            asyncio.run(validate_backend(backend))
-        except BackendValidationError as e:
-            print(f"Backend validation failed: {e}", file=sys.stderr)
-            sys.exit(1)
 
     settings = Settings(
         server=ServerSettings(host=host, port=port),

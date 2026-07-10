@@ -26,15 +26,15 @@ from typing import Any, AsyncGenerator, Literal
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from openai_http.auth import verify_api_key
-from openai_http.backends.contract import (
+from ..auth import verify_api_key
+from ..backends.contract import (
     validate_generation,
     validate_stream_chunk,
 )
-from openai_http.backends.types import ContentChunk, FinishChunk, ReasoningChunk
-from openai_http.errors import InvalidRequestError, NotFoundError
-from openai_http.schemas.common import UsageInfo
-from openai_http.schemas.completions import (
+from ..backends.types import ContentChunk, FinishChunk, ReasoningChunk
+from ..errors import InvalidRequestError, NotFoundError
+from ..schemas.common import UsageInfo
+from ..schemas.completions import (
     CompletionChunk,
     CompletionChunkChoice,
     CompletionRequest,
@@ -87,7 +87,6 @@ async def create_completion(
         InvalidRequestError: If max_tokens is invalid.
     """
     backend = request.app.state.backend
-    queue = request.app.state.queue
 
     model_info = await backend.get_model(body.model)
     if model_info is None:
@@ -105,93 +104,127 @@ async def create_completion(
 
     prompt_str = _normalize_prompt(body.prompt)
 
-    kwargs: dict[str, Any] = {}
-    if body.max_tokens is not None:
-        kwargs["max_tokens"] = body.max_tokens
-    if body.temperature is not None:
-        kwargs["temperature"] = body.temperature
-    if body.top_p is not None:
-        kwargs["top_p"] = body.top_p
+    gen_kwargs = body.model_dump(
+        exclude_none=True,
+        exclude={
+            "prompt",
+            "stream",
+            "model",
+            "suffix",
+            "logprobs",
+            "echo",
+            "stop",
+            "best_of",
+            "logit_bias",
+            "user",
+            "n",
+            "presence_penalty",
+            "frequency_penalty",
+        },
+    )
 
     if body.stream:
+        return await _completion_stream(
+            body, request, prompt_str, gen_kwargs, n, request_id, created
+        )
+    return await _completion_non_stream(
+        body, request, prompt_str, gen_kwargs, n, request_id, created
+    )
 
-        async def stream_generator() -> AsyncGenerator[str, None]:
-            """Generate streaming completion chunks.
 
-            Yields:
-                str: SSE-formatted completion chunks, ending with a [DONE] signal.
-            """
-            try:
-                async with queue.acquire():
-                    for idx in range(n):
+async def _completion_stream(
+    body: CompletionRequest,
+    request: Request,
+    prompt_str: str,
+    gen_kwargs: dict[str, Any],
+    n: int,
+    request_id: str,
+    created: int,
+) -> StreamingResponse:
+    backend = request.app.state.backend
+    queue = request.app.state.queue
+
+    async def stream_generator() -> AsyncGenerator[str, None]:
+        try:
+            async with queue.acquire():
+                for idx in range(n):
+                    yield _make_chunk(
+                        request_id,
+                        body.model,
+                        created,
+                        idx,
+                        text="",
+                    )
+
+                    stream_finish_reason: _LegacyFinish = "stop"
+                    async for token in backend.generate_stream(
+                        prompt_str, **gen_kwargs
+                    ):
+                        chunk = validate_stream_chunk(token)
+                        if isinstance(chunk, FinishChunk):
+                            stream_finish_reason = _coerce_legacy_finish(chunk.reason)
+                            continue
+                        if isinstance(chunk, ReasoningChunk):
+                            continue
+                        if isinstance(chunk, ContentChunk):
+                            chunk_text = chunk.content
+                        else:
+                            chunk_text = chunk
                         yield _make_chunk(
                             request_id,
                             body.model,
                             created,
                             idx,
-                            text="",
+                            text=chunk_text,
                         )
 
-                        stream_finish_reason: _LegacyFinish = "stop"
-                        async for token in backend.generate_stream(
-                            prompt_str, **kwargs
-                        ):
-                            chunk = validate_stream_chunk(token)
-                            if isinstance(chunk, FinishChunk):
-                                stream_finish_reason = _coerce_legacy_finish(
-                                    chunk.reason
-                                )
-                                continue
-                            if isinstance(chunk, ReasoningChunk):
-                                # Legacy completions have no reasoning slot;
-                                # drop reasoning text from the stream.
-                                continue
-                            if isinstance(chunk, ContentChunk):
-                                chunk_text = chunk.content
-                            else:
-                                chunk_text = chunk
-                            yield _make_chunk(
-                                request_id,
-                                body.model,
-                                created,
-                                idx,
-                                text=chunk_text,
-                            )
+                    yield _make_chunk(
+                        request_id,
+                        body.model,
+                        created,
+                        idx,
+                        text="",
+                        finish_reason=stream_finish_reason,
+                    )
 
-                        yield _make_chunk(
-                            request_id,
-                            body.model,
-                            created,
-                            idx,
-                            text="",
-                            finish_reason=stream_finish_reason,
-                        )
-
-                    yield "data: [DONE]\n\n"
-
-            except Exception as e:
-                error_msg = json.dumps(
-                    {
-                        "error": {
-                            "message": str(e),
-                            "type": "server_error",
-                            "param": None,
-                            "code": "generation_error",
-                        }
-                    }
-                )
-                yield f"data: {error_msg}\n\n"
                 yield "data: [DONE]\n\n"
 
-        return StreamingResponse(
-            stream_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        except Exception:  # pylint: disable=broad-exception-caught
+            error_msg = json.dumps(
+                {
+                    "error": {
+                        "message": "Internal server error. Please try again later.",
+                        "type": "server_error",
+                        "param": None,
+                        "code": "generation_error",
+                    }
+                }
+            )
+            yield f"data: {error_msg}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _completion_non_stream(
+    body: CompletionRequest,
+    request: Request,
+    prompt_str: str,
+    gen_kwargs: dict[str, Any],
+    n: int,
+    request_id: str,
+    created: int,
+) -> JSONResponse:
+    backend = request.app.state.backend
+    queue = request.app.state.queue
 
     async with queue.acquire():
         choices: list[TextChoice] = []
@@ -199,7 +232,7 @@ async def create_completion(
         total_completion_tokens = 0
 
         for idx in range(n):
-            raw_result = await backend.generate(prompt_str, **kwargs)
+            raw_result = await backend.generate(prompt_str, **gen_kwargs)
             result = validate_generation(raw_result)
             generated = result.generated_text or ""
 
@@ -235,13 +268,14 @@ async def create_completion(
 def _normalize_prompt(prompt) -> str:
     """Normalize a prompt into a single string.
 
-    Handles string, list-of-strings, and list-of-token-array formats.
-
     Args:
         prompt: The raw prompt input.
 
     Returns:
         str: The normalized prompt string.
+
+    Raises:
+        InvalidRequestError: If prompt is a list of token arrays.
     """
     if isinstance(prompt, str):
         return prompt
@@ -251,7 +285,10 @@ def _normalize_prompt(prompt) -> str:
         if isinstance(prompt[0], str):
             return "\n".join(prompt)
         if isinstance(prompt[0], list):
-            return ""
+            raise InvalidRequestError(
+                message="Tokenized input (list of int arrays) is not supported",
+                param="prompt",
+            )
         return str(prompt)
     return str(prompt)
 

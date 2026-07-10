@@ -21,20 +21,19 @@ POST /v1/embeddings - generate vector embeddings
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from openai_http.auth import verify_api_key
-from openai_http.errors import (
+from ..auth import verify_api_key
+from ..errors import (
     InvalidRequestError,
     NotFoundError,
     NotImplementedOpenAIError,
 )
-from openai_http.schemas.common import UsageInfo
-from openai_http.schemas.embeddings import (
+from ..schemas.common import UsageInfo
+from ..schemas.embeddings import (
     EmbeddingObject,
     EmbeddingRequest,
     EmbeddingResponse,
     floats_to_base64,
 )
-
 
 router = APIRouter(tags=["Embeddings"], dependencies=[Depends(verify_api_key)])
 
@@ -64,18 +63,7 @@ async def create_embeddings(
     if model_info is None:
         raise NotFoundError(message=f"The model '{body.model}' does not exist")
 
-    texts: list[str] = []
-    raw_inputs = body.input if isinstance(body.input, list) else [body.input]
-    for item in raw_inputs:
-        if isinstance(item, str):
-            texts.append(item)
-        elif isinstance(item, list):
-            raise InvalidRequestError(
-                message="Tokenized input (int arrays) is not supported in mock mode",
-                param="input",
-            )
-        else:
-            texts.append(str(item))
+    texts = [t for t in body.input if isinstance(t, str)]
 
     if not texts or all(t.strip() == "" for t in texts):
         raise InvalidRequestError(
@@ -89,8 +77,10 @@ async def create_embeddings(
 
     try:
         embeddings = await backend.embed(texts, **kwargs)
-    except NotImplementedError:
-        raise NotImplementedOpenAIError("Embeddings are not supported by this backend")
+    except NotImplementedError as ex:
+        raise NotImplementedOpenAIError(
+            "Embeddings are not supported by this backend"
+        ) from ex
 
     data: list[EmbeddingObject] = []
     for i, vec in enumerate(embeddings):

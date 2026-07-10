@@ -21,7 +21,9 @@ Compatible with OpenAI v1 /v1/chat/completions endpoint.
 from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
-from openai_http.schemas.common import UsageInfo
+from .common import UsageInfo
+
+FinishReason = Literal["stop", "length", "tool_calls", "content_filter"]
 
 
 class ChatMessage(BaseModel):
@@ -173,9 +175,7 @@ class Choice(BaseModel):
     index: int
     message: ChoiceMessage
     logprobs: Optional[Any] = None
-    finish_reason: Optional[
-        Literal["stop", "length", "tool_calls", "content_filter"]
-    ] = None
+    finish_reason: Optional[FinishReason] = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -231,9 +231,7 @@ class ChunkChoice(BaseModel):
     index: int
     delta: DeltaMessage
     logprobs: Optional[Any] = None
-    finish_reason: Optional[
-        Literal["stop", "length", "tool_calls", "content_filter"]
-    ] = None
+    finish_reason: Optional[FinishReason] = None
 
 
 class ChatCompletionChunk(BaseModel):

@@ -1,21 +1,3 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Tests for 501 responses for unimplemented endpoints.
-"""
-
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -58,9 +40,7 @@ async def no_embed_client():
         server=ServerSettings(host="127.0.0.1", port=8000),
         auth=AuthSettings(enabled=False, api_keys=[]),
         queue=QueueSettings(depth=32),
-        observability=ObservabilitySettings(
-            log_level="debug", log_format="text", metrics_enabled=False
-        ),
+        observability=ObservabilitySettings(log_level="debug", log_format="text"),
     )
     backend = _NoEmbedBackend()
     app = create_app(config=settings, backend=backend)

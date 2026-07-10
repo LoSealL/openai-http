@@ -21,19 +21,20 @@ application instance.
 """
 
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
-from openai_http.config import Settings, get_settings
-from openai_http.errors import register_error_handlers
-from openai_http.observability.logging import (
+from .backends.mock_backend import MockTransformersBackend
+from .config import Settings, get_settings
+from .errors import register_error_handlers
+from .observability.logging import (
     RequestIDMiddleware,
     RequestLoggingMiddleware,
     setup_logging,
 )
-from openai_http.queue import RequestQueue
-from openai_http.routers import (
+from .queue import RequestQueue
+from .routers import (
     audio,
     chat,
     completions,
@@ -42,6 +43,12 @@ from openai_http.routers import (
     images,
     models,
 )
+
+
+try:
+    APP_VERSION = version("openai-http")
+except PackageNotFoundError:
+    APP_VERSION = "0.0.0"
 
 
 @asynccontextmanager
@@ -57,29 +64,18 @@ async def lifespan(app: FastAPI):
     Yields:
         Control back to FastAPI to begin serving requests.
     """
-    settings = app.state.config
-    app.state.queue = RequestQueue(max_depth=settings.queue.depth)
+    app.state.queue = RequestQueue(max_depth=app.state.config.queue.depth)
 
-    injected = getattr(app.state, "_injected_backend", None)
-    if injected is not None:
+    if injected := getattr(app.state, "injected", None):
         app.state.backend = injected
-        if not getattr(injected, "_openai_http_initialized", False):
-            try:
-                await injected.setup()
-            except Exception as e:
-                raise RuntimeError(f"Backend setup failed: {e}") from e
     else:
-        from openai_http.backends.mock_backend import MockTransformersBackend
+        app.state.backend = MockTransformersBackend(model_name="mock-model")
 
-        app.state.backend = MockTransformersBackend(
-            model_name="mock-model",
-        )
+    await app.state.backend.setup()
 
     yield
 
-    backend = getattr(app.state, "backend", None)
-    if backend is not None and injected is not None:
-        await backend.teardown()
+    await app.state.backend.teardown()
     app.state.backend = None
 
 
@@ -110,23 +106,16 @@ def create_app(
     app = FastAPI(
         title="OpenAI-Compatible API Server",
         description="OpenAI v1 API-compatible HTTP service with pluggable inference backends",
-        version="1.0.0",
+        version=APP_VERSION,
         lifespan=lifespan,
     )
 
     app.state.config = config
     if backend is not None:
-        app.state._injected_backend = backend
+        app.state.injected = backend
 
     register_error_handlers(app)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIDMiddleware)
 

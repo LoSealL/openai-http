@@ -27,17 +27,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from openai_http.backends.types import (
-    ContentChunk,
-    FinishChunk,
+from .types import (
     GenerationResult,
     ModelInfo,
-    ReasoningChunk,
     StreamChunk,
 )
-from openai_http.errors import OpenAIError
+from ..errors import OpenAIError
+
+_stream_chunk_adapter: TypeAdapter[StreamChunk] = TypeAdapter(StreamChunk)
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +115,6 @@ def validate_stream_chunk(raw: Any) -> StreamChunk | str:
     """
     if isinstance(raw, str):
         return raw
-    if isinstance(raw, (ReasoningChunk, ContentChunk, FinishChunk)):
-        return raw
     if isinstance(raw, dict):
         try:
             return _validate_chunk_dict(raw)
@@ -136,14 +133,7 @@ def validate_stream_chunk(raw: Any) -> StreamChunk | str:
 
 def _validate_chunk_dict(raw: dict) -> StreamChunk:
     """Validate a stream chunk dict against the discriminator union."""
-    chunk_type = raw.get("type")
-    if chunk_type == "reasoning":
-        return ReasoningChunk.model_validate(raw)
-    if chunk_type == "content":
-        return ContentChunk.model_validate(raw)
-    if chunk_type == "finish":
-        return FinishChunk.model_validate(raw)
-    return ContentChunk.model_validate(raw)
+    return _stream_chunk_adapter.validate_python(raw)
 
 
 def validate_model_info(raw: Any) -> ModelInfo:

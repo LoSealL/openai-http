@@ -23,7 +23,7 @@ import struct
 from typing import Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from openai_http.schemas.common import UsageInfo
+from .common import UsageInfo
 
 
 class EmbeddingRequest(BaseModel):
@@ -49,17 +49,11 @@ class EmbeddingRequest(BaseModel):
 
     @field_validator("input", mode="before")
     @classmethod
-    def normalize_input(cls, v):
-        """Normalize a single string input into a single-element list.
-
-        Args:
-            v: The raw input value.
-
-        Returns:
-            A list of input items.
-        """
+    def _normalize(cls, v):
         if isinstance(v, str):
             return [v]
+        if isinstance(v, list) and v and isinstance(v[0], int):
+            raise ValueError("input must be a string or list of strings, not token IDs")
         return v
 
 

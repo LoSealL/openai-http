@@ -21,11 +21,12 @@ GET /v1/models/{id}    - retrieve a specific model
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
-from openai_http.auth import verify_api_key
-from openai_http.backends.contract import validate_model_info, validate_model_list
-from openai_http.errors import NotFoundError
-from openai_http.schemas.models import Model, ModelListResponse
+from ..auth import verify_api_key
+from ..backends.contract import _contract_error
+from ..errors import NotFoundError
+from ..schemas.models import Model, ModelListResponse
 
 
 router = APIRouter(tags=["Models"], dependencies=[Depends(verify_api_key)])
@@ -40,10 +41,12 @@ async def list_models(request: Request) -> JSONResponse:
     """
     backend = request.app.state.backend
     raw_models = await backend.list_models()
-    models = validate_model_list(raw_models)
-    response = ModelListResponse(
-        data=[Model(**m.model_dump()) for m in models],
-    )
+    try:
+        response = ModelListResponse(
+            data=[Model.model_validate(m) for m in raw_models],
+        )
+    except ValidationError as exc:
+        raise _contract_error("model list", exc) from exc
     return JSONResponse(content=response.model_dump(exclude_none=True))
 
 
@@ -64,7 +67,4 @@ async def retrieve_model(model_id: str, request: Request) -> JSONResponse:
     raw = await backend.get_model(model_id)
     if raw is None:
         raise NotFoundError(message=f"The model '{model_id}' does not exist")
-    info = validate_model_info(raw)
-    return JSONResponse(
-        content=Model(**info.model_dump()).model_dump(exclude_none=True)
-    )
+    return JSONResponse(content=Model.model_validate(raw).model_dump(exclude_none=True))

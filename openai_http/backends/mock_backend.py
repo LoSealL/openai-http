@@ -20,18 +20,11 @@ No real model weights are loaded.
 """
 
 import asyncio
-import base64
-import io
 import json
 import random
-import re
 from typing import Any, AsyncGenerator, Optional
 
-from PIL import Image
-
-from openai_http.backends.base import BackendBase
-
-_DATA_URI_RE = re.compile(r"^data:(image/\w+);base64,(.+)$")
+from .base import BackendBase
 
 
 AVAILABLE_MODELS = [
@@ -67,112 +60,6 @@ class MockTransformersBackend(BackendBase):
         self.model_name = model_name
         self.thinking = thinking
 
-    @staticmethod
-    def _decode_image(b64_data: str) -> dict[str, Any]:
-        try:
-            decoded = base64.b64decode(b64_data, validate=True)
-        except Exception:
-            return {"_type": "image", "format": "unknown", "size_bytes": len(b64_data)}
-        info: dict[str, Any] = {"_type": "image", "size_bytes": len(decoded)}
-        try:
-            img = Image.open(io.BytesIO(decoded))
-            info["format"] = img.format.lower() if img.format else "unknown"
-            info["mode"] = img.mode
-            info["width"] = img.width
-            info["height"] = img.height
-        except ImportError:
-            pass
-        except Exception:
-            info["format"] = "unknown"
-        return info
-
-    @staticmethod
-    def _summarize_value(v: Any) -> Any:
-        if isinstance(v, str):
-            m = _DATA_URI_RE.match(v)
-            if m:
-                return MockTransformersBackend._decode_image(m.group(2))
-            if len(v) > 1000 and re.fullmatch(r"^[A-Za-z0-9+/=]+$", v):
-                return MockTransformersBackend._decode_image(v)
-            return v
-        if isinstance(v, dict):
-            return {
-                k: MockTransformersBackend._summarize_value(item)
-                for k, item in v.items()
-            }
-        if isinstance(v, list):
-            return [MockTransformersBackend._summarize_value(item) for item in v]
-        return v
-
-    def _log_payload(self, method: str, **kwargs) -> None:
-        summary: dict[str, Any] = {"method": method}
-        for k, v in kwargs.items():
-            summary[k] = self._summarize_value(v)
-        print(f"[MockBackend] Payload:\n{json.dumps(summary, indent=2, default=str)}")
-
-    @staticmethod
-    def _estimate_tokens(text: str) -> int:
-        """Roughly estimate token count for a text string.
-
-        Uses a simple heuristic: CJK characters count as 1.5 tokens,
-        others as 0.25 tokens.
-
-        Args:
-            text: The input text string.
-
-        Returns:
-            Estimated token count, minimum 1.
-        """
-        count: float = 0
-        for char in text:
-            if "\u4e00" <= char <= "\u9fff":
-                count += 1.5
-            else:
-                count += 0.25
-        return int(max(1, count))
-
-    @staticmethod
-    def _parse_reasoning(text: str) -> tuple[str | None, str]:
-        """Parse <think>...</think> tags from generated text.
-
-        Args:
-            text: Raw generated text that may contain <think> tags.
-
-        Returns:
-            A tuple of (reasoning_content, content). reasoning_content
-            is None if no <think> tags are found.
-        """
-        think_start = text.find("<think>")
-        think_end = text.rfind("</think>")
-        if think_start == -1 or think_end == -1 or think_end <= think_start:
-            return None, text
-        reasoning = text[think_start + 7 : think_end]
-        content = text[think_end + 8 :].lstrip("\n")
-        return reasoning, content
-
-    @staticmethod
-    def _build_prompt(messages: list[dict[str, str]]) -> str:
-        """Build a plain text prompt from a list of message dicts.
-
-        Args:
-            messages: List of message dicts with role and content keys.
-
-        Returns:
-            A formatted prompt string suitable for text generation.
-        """
-        prompt_parts = []
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role == "system":
-                prompt_parts.append(f"System: {content}")
-            elif role == "user":
-                prompt_parts.append(f"User: {content}")
-            elif role == "assistant":
-                prompt_parts.append(f"Assistant: {content}")
-        prompt_parts.append("Assistant:")
-        return "\n".join(prompt_parts)
-
     async def generate(
         self,
         prompt: str | list[dict[str, str]],
@@ -188,8 +75,6 @@ class MockTransformersBackend(BackendBase):
         Returns:
             A dict with generated_text (or tool_calls) and usage token counts.
         """
-        self._log_payload("generate", prompt=prompt, **kwargs)
-
         if isinstance(prompt, list):
             messages = prompt
         else:
@@ -203,8 +88,7 @@ class MockTransformersBackend(BackendBase):
         max_tokens = kwargs.get("max_tokens", 512)
         temperature = kwargs.get("temperature", 0.7)
 
-        built_prompt = self._build_prompt(messages)
-        prompt_tokens = self._estimate_tokens(built_prompt)
+        prompt_tokens = len(str(messages)) // 4
 
         generation_time = 0.001 * min(max_tokens, 100)
         await asyncio.sleep(generation_time)
@@ -219,7 +103,8 @@ class MockTransformersBackend(BackendBase):
             templates = [
                 f"This is a mock response. Your input was: {last_user_msg[:50]}",
                 f'[Random Mode] You said "{last_user_msg[:20]}"... interesting question!',
-                f"Mock model response: input length {len(last_user_msg)} chars, temperature={temperature:.2f}.",
+                f"Mock model response: input length {len(last_user_msg)} chars, "
+                f"temperature={temperature:.2f}.",
             ]
             generated_text = random.choice(templates)
         else:
@@ -238,14 +123,16 @@ class MockTransformersBackend(BackendBase):
         else:
             full_text = generated_text
 
-        completion_tokens = self._estimate_tokens(full_text)
+        completion_tokens = len(full_text) // 4
         finish_reason: str = "stop"
         if completion_tokens > max_tokens:
             finish_reason = "length"
 
         if reasoning_content:
-            parts = full_text.split("</think>", 1)
-            generated_text = parts[1].lstrip("\n") if len(parts) > 1 else ""
+            think_start = full_text.find("<think>")
+            think_end = full_text.rfind("</think>")
+            if think_start != -1 and think_end != -1 and think_end > think_start:
+                generated_text = full_text[think_end + 8 :].lstrip("\n")
             if finish_reason == "length":
                 char_budget = max_tokens * 4
                 reasoning_budget = min(len(reasoning_content), char_budget // 2)
@@ -260,7 +147,7 @@ class MockTransformersBackend(BackendBase):
 
         emitted = (reasoning_content or "") + (generated_text or "")
         if emitted:
-            completion_tokens = min(self._estimate_tokens(emitted), max_tokens)
+            completion_tokens = min(len(emitted) // 4, max_tokens)
         else:
             completion_tokens = 0
 
@@ -334,7 +221,7 @@ class MockTransformersBackend(BackendBase):
             },
         }
 
-    async def generate_stream(
+    async def generate_stream(  # type: ignore[override]
         self,
         prompt: str | list[dict[str, str]],
         **kwargs: Any,
@@ -392,8 +279,6 @@ class MockTransformersBackend(BackendBase):
         Returns:
             A list of float vectors, one per input text.
         """
-        self._log_payload("embed", texts=texts, **kwargs)
-
         dims = kwargs.get("dimensions", 1536)
         embeddings = []
         for text in texts:

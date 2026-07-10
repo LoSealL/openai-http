@@ -17,7 +17,6 @@ Dependencies:
 
 import argparse
 import asyncio
-import base64
 import io
 import os
 import time
@@ -122,14 +121,11 @@ class OnnxRuntimeBackend(BackendBase):
         self.vision_session = None
         self.decoder_session = None
         self._loaded_at: int | None = None
-        self.num_layers = 24
-        self.hidden_size = 1024
+        self.num_layers = 24  # ponytail: model-specific, Qwen3.5-0.8B has 24 layers
         self._reasoning_parser: ParserBase | None = None
         self._tools_parser: ParserBase | None = None
-        self.image_pad_id = 248056
-
-        # EOS tokens from generation_config.json
-        self.eos_token_ids = {248046, 248044}
+        self.image_pad_id: int | None = None
+        self.eos_token_ids: set[int] = set()
 
     def _load_onnx_model(
         self, onnx_dir: str, base_name: str, providers: list[str]
@@ -240,6 +236,24 @@ class OnnxRuntimeBackend(BackendBase):
             self.decoder_session,
         ) = await asyncio.to_thread(_load)
         self._loaded_at = int(time.time())
+
+        # Resolve magic token IDs from tokenizer / generation config
+        self.image_pad_id = self.tokenizer.convert_tokens_to_ids("<|image_pad|>")
+        try:
+            from transformers import GenerationConfig
+
+            gen_config = GenerationConfig.from_pretrained(self.model_id)
+            self.eos_token_ids = (
+                (
+                    set(gen_config.eos_token_id)
+                    if isinstance(gen_config.eos_token_id, list)
+                    else {gen_config.eos_token_id}
+                )
+                if gen_config.eos_token_id
+                else {248046, 248044}
+            )
+        except Exception:
+            self.eos_token_ids = {248046, 248044}
 
         self._reasoning_parser = get_parser(self.reasoning_parser)
         self._tools_parser = get_parser(self.toolcall_parser)
@@ -384,10 +398,12 @@ class OnnxRuntimeBackend(BackendBase):
                         images.append(img)
                         new_parts.append({"type": "image"})
                     else:
-                        new_parts.append({
-                            "type": "text",
-                            "text": "[unsupported image]",
-                        })
+                        new_parts.append(
+                            {
+                                "type": "text",
+                                "text": "[unsupported image]",
+                            }
+                        )
                 else:
                     new_parts.append(part)
             normalized.append({**msg, "content": new_parts})
@@ -401,12 +417,11 @@ class OnnxRuntimeBackend(BackendBase):
         """
         if not isinstance(url, str) or not url.startswith("data:"):
             return None
-        _, _, data = url.partition(",")
+
         try:
-            raw = base64.b64decode(data, validate=True)
-        except Exception:
-            return None
-        try:
+            import base64
+
+            raw = base64.b64decode(url.split(",", 1)[1])
             return Image.open(io.BytesIO(raw)).convert("RGB")
         except Exception:
             return None
@@ -534,6 +549,43 @@ class OnnxRuntimeBackend(BackendBase):
         except (TypeError, ValueError):
             return self.tokenizer.apply_chat_template(messages, **common, **extra)
 
+    def _step(
+        self,
+        first_token_id: int,
+        prompt_len: int,
+        sampler: Sampler,
+        max_new_tokens: int,
+        past_states: dict[str, np.ndarray],
+    ) -> Any:
+        """Yield ``(token_id, past_states)`` for each decode step.
+
+        Starts from *first_token_id* (the prefill result) and runs the
+        autoregressive decode loop.  The caller is responsible for the
+        prefill forward pass itself.
+        """
+        next_token_id = first_token_id
+        total_seq_len = prompt_len + 1
+
+        for _ in range(max_new_tokens - 1):
+            if next_token_id in self.eos_token_ids:
+                return
+
+            next_token_array = np.array([[next_token_id]], dtype=np.int64)
+            inputs_embeds = self.embed_session.run(
+                None, {"input_ids": next_token_array}
+            )[0]
+
+            position = np.array([total_seq_len - 1], dtype=np.int64)
+            position_ids = self._build_position_ids(position)
+            attention_mask = np.ones((1, total_seq_len), dtype=np.int64)
+
+            logits, past_states = self._run_decoder(
+                inputs_embeds, attention_mask, position_ids, past_states
+            )
+            next_token_id = sampler.sample(logits[0, -1, :])
+            yield next_token_id, past_states
+            total_seq_len += 1
+
     def _generate(
         self,
         inputs_embeds: np.ndarray,
@@ -547,53 +599,22 @@ class OnnxRuntimeBackend(BackendBase):
         """Run the full generation loop."""
         sampler = Sampler(temperature=temperature, top_p=top_p)
 
-        # Build position_ids for prompt
+        # Prefill (first pass)
         positions = np.arange(prompt_len, dtype=np.int64)
         position_ids = self._build_position_ids(positions)
-
-        # Attention mask for prompt
         attention_mask = np.ones((1, prompt_len), dtype=np.int64)
-
-        # Initialize past states
         past_states = self._init_past_states(batch_size=1)
-
-        # Prefill (first pass)
         logits, past_states = self._run_decoder(
             inputs_embeds, attention_mask, position_ids, past_states
         )
-        next_token_id = sampler.sample(logits[0, -1, :])
-        generated_tokens = [next_token_id]
+        first_token_id = sampler.sample(logits[0, -1, :])
+        generated_tokens = [first_token_id]
 
-        # Decode loop
-        total_seq_len = prompt_len + 1
-        for _ in range(max_new_tokens - 1):
-            if next_token_id in self.eos_token_ids:
-                break
+        for token_id, _ in self._step(
+            first_token_id, prompt_len, sampler, max_new_tokens, past_states
+        ):
+            generated_tokens.append(token_id)
 
-            # Embed single token
-            next_token_array = np.array([[next_token_id]], dtype=np.int64)
-            embed_outputs = self.embed_session.run(
-                None, {"input_ids": next_token_array}
-            )
-            inputs_embeds = embed_outputs[0]
-
-            # Position for new token
-            position = np.array([total_seq_len - 1], dtype=np.int64)
-            position_ids = self._build_position_ids(position)
-
-            # Attention mask
-            attention_mask = np.ones((1, total_seq_len), dtype=np.int64)
-
-            # Decode step
-            logits, past_states = self._run_decoder(
-                inputs_embeds, attention_mask, position_ids, past_states
-            )
-            next_token_id = sampler.sample(logits[0, -1, :])
-            generated_tokens.append(next_token_id)
-
-            total_seq_len += 1
-
-        # Decode result (keep special tokens for reasoning/tool parsing).
         generated_text = self.tokenizer.decode(
             generated_tokens, skip_special_tokens=skip_special_tokens
         )
@@ -740,19 +761,17 @@ class OnnxRuntimeBackend(BackendBase):
         sampler = Sampler(temperature=temperature, top_p=top_p)
 
         # Prefill
+        positions = np.arange(prompt_len, dtype=np.int64)
+        position_ids = self._build_position_ids(positions)
+        attention_mask = np.ones((1, prompt_len), dtype=np.int64)
+        past_states = self._init_past_states(batch_size=1)
         logits, past_states = self._run_decoder(
-            inputs_embeds,
-            np.ones((1, prompt_len), dtype=np.int64),
-            self._build_position_ids(np.arange(prompt_len, dtype=np.int64)),
-            self._init_past_states(batch_size=1),
+            inputs_embeds, attention_mask, position_ids, past_states
         )
-        next_token_id = sampler.sample(logits[0, -1, :])
+        first_token_id = sampler.sample(logits[0, -1, :])
 
-        total_seq_len = prompt_len + 1
         completion_tokens = 1
-
-        # Accumulate tokens for proper multi-byte character handling
-        accumulated_tokens = [next_token_id]
+        accumulated_tokens = [first_token_id]
         yielded_text = ""
 
         def _yield_new_text():
@@ -760,8 +779,7 @@ class OnnxRuntimeBackend(BackendBase):
             full_text = self.tokenizer.decode(
                 accumulated_tokens, skip_special_tokens=False
             )
-
-            # Find common prefix between yielded_text and full_text
+            # ponytail: manual commonprefix, fine for short strings
             common_len = 0
             min_len = min(len(yielded_text), len(full_text))
             for i in range(min_len):
@@ -769,15 +787,11 @@ class OnnxRuntimeBackend(BackendBase):
                     common_len += 1
                 else:
                     break
-
             new_text = full_text[common_len:]
-
-            # If new_text ends with replacement char, it might be incomplete
             if new_text and new_text.endswith("\ufffd"):
                 clean_text = new_text.rstrip("\ufffd")
                 yielded_text += clean_text
                 return clean_text if clean_text else None
-
             yielded_text += new_text
             return new_text if new_text else None
 
@@ -786,43 +800,18 @@ class OnnxRuntimeBackend(BackendBase):
         if new_text:
             yield new_text
 
-        # Decode loop
-        for _ in range(max_new_tokens - 1):
-            if next_token_id in self.eos_token_ids:
-                print(f"[stream] finished:\n{yielded_text}")
-                yield {"type": "finish", "reason": "stop"}
-                return
-
-            # Embed single token
-            next_token_array = np.array([[next_token_id]], dtype=np.int64)
-            embed_outputs = self.embed_session.run(
-                None, {"input_ids": next_token_array}
-            )
-            inputs_embeds = embed_outputs[0]
-
-            # Position for new token
-            position = np.array([total_seq_len - 1], dtype=np.int64)
-            position_ids = self._build_position_ids(position)
-
-            # Attention mask
-            attention_mask = np.ones((1, total_seq_len), dtype=np.int64)
-
-            # Decode step
-            logits, past_states = self._run_decoder(
-                inputs_embeds, attention_mask, position_ids, past_states
-            )
-            next_token_id = sampler.sample(logits[0, -1, :])
-            accumulated_tokens.append(next_token_id)
-
+        # Decode loop via shared _step
+        for token_id, _ in self._step(
+            first_token_id, prompt_len, sampler, max_new_tokens, past_states
+        ):
+            accumulated_tokens.append(token_id)
+            completion_tokens += 1
             new_text = _yield_new_text()
             if new_text:
                 yield new_text
 
-            total_seq_len += 1
-            completion_tokens += 1
-
         print(f"[stream] finished:\n{yielded_text}")
-        yield {"type": "finish", "reason": "length"}
+        yield {"type": "finish", "reason": "stop"}
 
     async def list_models(self) -> list[dict]:
         return [

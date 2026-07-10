@@ -22,7 +22,7 @@ appropriate HTTP status codes.
 import logging
 from typing import Optional
 
-from fastapi import HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -51,15 +51,7 @@ class OpenAIError(HTTPException):
         code: Optional[str] = None,
         status_code: int = 500,
     ):
-        detail = {
-            "error": {
-                "message": message,
-                "type": error_type,
-                "param": param,
-                "code": code,
-            }
-        }
-        super().__init__(status_code=status_code, detail=detail)
+        super().__init__(status_code=status_code, detail=None)
         self.message = message
         self.error_type = error_type
         self.param = param
@@ -200,34 +192,39 @@ def _error_json(
     }
 
 
-async def openai_error_handler(request: Request, exc: OpenAIError) -> JSONResponse:
+# pylint: disable=unused-argument
+async def openai_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle standard OpenAIError exceptions.
 
     Args:
         request: The incoming HTTP request.
-        exc: The raised OpenAIError instance.
+        exc: The raised exception, expected to be an OpenAIError instance.
 
     Returns:
         A JSONResponse with the error's status code and body.
     """
+    if not isinstance(exc, OpenAIError):
+        raise TypeError("openai_error_handler received non-OpenAIError")
+
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_json(exc.message, exc.error_type, exc.param, exc.code),
     )
 
 
-async def validation_error_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def validation_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle Pydantic / FastAPI request validation errors.
 
     Args:
         request: The incoming HTTP request.
-        exc: The raised RequestValidationError instance.
+        exc: The raised exception, expected to be a RequestValidationError instance.
 
     Returns:
         A JSONResponse with HTTP 400 and OpenAI-format error body.
     """
+    if not isinstance(exc, RequestValidationError):
+        raise TypeError("validation_error_handler received non-RequestValidationError")
+
     errors = exc.errors()
     message = "; ".join(f"{e.get('loc', '')}: {e.get('msg', '')}" for e in errors)
     param = errors[0].get("loc", [None])[-1] if errors else None
@@ -242,7 +239,7 @@ async def validation_error_handler(
     )
 
 
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle generic HTTPException errors.
 
     If the exception already has an OpenAI-format detail dict it is
@@ -251,11 +248,14 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
     Args:
         request: The incoming HTTP request.
-        exc: The raised HTTPException instance.
+        exc: The raised exception, expected to be an HTTPException instance.
 
     Returns:
         A JSONResponse with the appropriate status code and error body.
     """
+    if not isinstance(exc, HTTPException):
+        raise TypeError("http_exception_handler received non-HTTPException")
+
     if isinstance(exc.detail, dict) and "error" in exc.detail:
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
 
@@ -299,7 +299,7 @@ async def generic_error_handler(request: Request, exc: Exception) -> JSONRespons
     )
 
 
-def register_error_handlers(app) -> None:
+def register_error_handlers(app: FastAPI) -> None:
     """Register all error handlers on the FastAPI app.
 
     Handlers are registered for:
@@ -307,7 +307,6 @@ def register_error_handlers(app) -> None:
     - RequestValidationError (Pydantic)
     - HTTPException (FastAPI / Starlette)
     - Exception (catch-all)
-    - 404 (explicit not-found handler)
 
     Args:
         app: The FastAPI application instance.
@@ -316,17 +315,3 @@ def register_error_handlers(app) -> None:
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, generic_error_handler)
-
-    async def not_found_handler(request: Request, exc: HTTPException) -> JSONResponse:
-        if isinstance(exc, OpenAIError):
-            return await openai_error_handler(request, exc)
-        return JSONResponse(
-            status_code=404,
-            content=_error_json(
-                message="Resource not found",
-                error_type="not_found_error",
-                code="404",
-            ),
-        )
-
-    app.add_exception_handler(404, not_found_handler)

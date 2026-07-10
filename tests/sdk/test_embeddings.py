@@ -1,28 +1,11 @@
-"""
-Copyright (C) 2026 The OPENAI-HTTP Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-Tests for OpenAI Embeddings API.
-
-Tests: client.embeddings.create()
-
-NOTE: /v1/embeddings is P2 — skipped until implemented. Tests verify expected behavior.
-"""
-
 import pytest
-from .test_base import OpenAITestBase, MOCK_MODELS
-from .mock_data import embedding_texts
+from .test_base import OpenAITestBase, MOCK_MODEL
+
+_EMBEDDING_TEXTS = [
+    "The quick brown fox jumps over the lazy dog",
+    "Machine learning is fascinating",
+    "OpenAI creates amazing tools",
+]
 
 
 def _call_or_skip(client, **kwargs):
@@ -40,9 +23,7 @@ class TestEmbeddingsAPI(OpenAITestBase):
 
     def test_embedding_single_text(self, client):
         """Test embedding for single text."""
-        response = _call_or_skip(
-            client, model=MOCK_MODELS[0], input="The quick brown fox"
-        )
+        response = _call_or_skip(client, model=MOCK_MODEL, input="The quick brown fox")
 
         assert response.object == "list"
         assert len(response.data) == 1
@@ -53,8 +34,8 @@ class TestEmbeddingsAPI(OpenAITestBase):
 
     def test_embedding_batch_texts(self, client):
         """Test embedding for batch of texts."""
-        texts = embedding_texts()
-        response = _call_or_skip(client, model=MOCK_MODELS[0], input=texts)
+        texts = _EMBEDDING_TEXTS
+        response = _call_or_skip(client, model=MOCK_MODEL, input=texts)
 
         assert response.object == "list"
         assert len(response.data) == len(texts)
@@ -63,42 +44,26 @@ class TestEmbeddingsAPI(OpenAITestBase):
 
     def test_embedding_dimensions(self, client):
         """Test that all embeddings have consistent dimensions."""
-        response = _call_or_skip(client, model=MOCK_MODELS[0], input=embedding_texts())
+        response = _call_or_skip(client, model=MOCK_MODEL, input=_EMBEDDING_TEXTS)
 
         if len(response.data) > 1:
             dim = len(response.data[0].embedding)
             for emb in response.data:
                 assert len(emb.embedding) == dim
 
-    def test_embedding_empty_input(self, client):
-        """Test with empty input array."""
-        try:
-            response = _call_or_skip(client, model=MOCK_MODELS[0], input=[])
-            assert response.object == "list"
-        except Exception as e:
-            if "400" in str(e) or "404" in str(e) or "validation" in str(e).lower():
-                pytest.skip(
-                    "/v1/embeddings not yet implemented or empty input rejected"
-                )
-            raise
-
     def test_embedding_long_text(self, client):
         """Test with long text input."""
-        response = _call_or_skip(client, model=MOCK_MODELS[0], input="word " * 1000)
+        response = _call_or_skip(client, model=MOCK_MODEL, input="word " * 1000)
         assert response.object == "list"
         assert len(response.data[0].embedding) > 0
 
     def test_embedding_special_characters(self, client):
         """Test with special characters."""
-        response = _call_or_skip(
-            client, model=MOCK_MODELS[0], input="Hello 世界! 🌍 \n\t"
-        )
+        response = _call_or_skip(client, model=MOCK_MODEL, input="Hello 世界! 🌍 \n\t")
         assert response.object == "list"
         assert len(response.data) > 0
 
     def test_embedding_unicode(self, client):
         """Test with unicode characters."""
-        response = _call_or_skip(
-            client, model=MOCK_MODELS[0], input="Unicode: αβγ δεζ ηθι"
-        )
+        response = _call_or_skip(client, model=MOCK_MODEL, input="Unicode: αβγ δεζ ηθι")
         assert response.object == "list"

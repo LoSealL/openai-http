@@ -15,10 +15,9 @@ limitations under the License.
 
 Common schema types shared across all endpoints.
 
-Provides UsageInfo for token counts and ErrorResponse for OpenAI-format errors.
+Provides UsageInfo for token counts.
 """
 
-from typing import Optional, Literal
 from pydantic import BaseModel
 
 
@@ -34,72 +33,3 @@ class UsageInfo(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-
-    @classmethod
-    def from_counts(cls, prompt: int, completion: int) -> "UsageInfo":
-        """Create a UsageInfo from prompt and completion token counts.
-
-        Args:
-            prompt: Prompt token count.
-            completion: Completion token count.
-
-        Returns:
-            A UsageInfo instance with computed total_tokens.
-        """
-        return cls(
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-            total_tokens=prompt + completion,
-        )
-
-
-class ErrorDetail(BaseModel):
-    """OpenAI error detail format.
-
-    Attributes:
-        message: The error message.
-        type: The error type string.
-        param: The parameter that caused the error, if any.
-        code: The error code, if any.
-    """
-
-    message: str
-    type: str
-    param: Optional[str] = None
-    code: Optional[str] = None
-
-
-class ErrorResponse(BaseModel):
-    """OpenAI error response format.
-
-    Attributes:
-        error: An ErrorDetail object describing the error.
-    """
-
-    error: ErrorDetail
-
-
-class ListResponse(BaseModel):
-    """Generic list response.
-
-    Attributes:
-        object: The object type, always "list".
-        data: The list of items.
-    """
-
-    object: Literal["list"] = "list"
-    data: list
-
-
-class DeletionResponse(BaseModel):
-    """Deletion confirmation response.
-
-    Attributes:
-        id: The ID of the deleted resource.
-        object: The object type, always "deleted".
-        deleted: Whether the deletion was successful.
-    """
-
-    id: str
-    object: str = "deleted"
-    deleted: bool = True
